@@ -2,10 +2,14 @@ from dotenv import load_dotenv
 import os
 
 
+# Подключаем библиотеку для хранения персональных данных
 load_dotenv()
 
 
+# Токен бота из Telegram
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-GROUP_PUBLICATION_CHAT_ID = os.getenv('GROUP_PUBLICATION_CHAT_ID')
-GROUP_CHAT_ID = os.getenv('GROUP_CHAT_ID')
+# Путь к БД
 DATABASE_URL = os.getenv('DATABASE_URL')
+
+# URL для отправки команды /start в ссылке на бота
+BOT_URL_FOR_START = os.getenv('BOT_URL_FOR_START')
