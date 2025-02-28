@@ -1,7 +1,7 @@
 MENU_COMMANDS: dict[str, str] = {
     '/help': 'Справка по работе бота',
     '/сборки': 'Сборки для Call of Duty: Mobile',
-    '/cancel': 'Отмена действия',
+    '/cancel': 'Отмена действия'
 }
 
 COMMANDS: dict[str, str] = {
