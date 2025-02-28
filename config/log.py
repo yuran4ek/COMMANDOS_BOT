@@ -1,9 +1,14 @@
+import os
 import logging
 from logging.handlers import RotatingFileHandler
 
 
-# Настройка ротации логов
-log_file = "logs/bot.log"
+# Путь к директории логов
+log_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'logs')
+log_file = os.path.join(log_dir, 'bot_log')
+
+# Создание папки logs
+os.makedirs(log_dir, exist_ok=True)
 
 # Обработчик для ротации логов (5 файлов по 1 MB каждый)
 file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
