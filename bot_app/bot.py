@@ -4,6 +4,8 @@ from aiogram import (
     Bot,
     Dispatcher
 )
+from aiogram.client.bot import DefaultBotProperties
+from aiogram.enums.parse_mode import ParseMode
 
 from handlers.bot_commands import bot_commands_router
 from handlers.group_handlers import bot_group_joined_router
@@ -26,7 +28,7 @@ async def main():
     # Инициализация бота
     bot = Bot(
         token=BOT_TOKEN,
-        parse_mode='HTML'
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
 
