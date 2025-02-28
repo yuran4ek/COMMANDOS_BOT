@@ -12,10 +12,7 @@ from unittest.mock import (
 )
 
 
-from aiogram import (
-    Dispatcher,
-    Bot
-)
+from aiogram import Bot
 from aiogram.types import (
     Message,
     Chat,
