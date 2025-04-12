@@ -9,7 +9,10 @@ from bot_app.lexicon.lexicon_common.lexicon_ru import (
     LEXICON_RU
 )
 
-from config.config import BOT_URL_FOR_START
+from config.config import (
+    BOT_URL_FOR_START,
+    CHANEL_URL
+)
 
 
 def create_link_button() -> InlineKeyboardMarkup:
@@ -31,7 +34,26 @@ def create_link_button() -> InlineKeyboardMarkup:
     return kb_builder.as_markup()
 
 
-def create_categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
+def create_link_chanel_button() -> InlineKeyboardMarkup:
+
+    """
+    Генерирует инлайн-кнопку с ссылкой на канал COMMANDOS.
+    :return: Возвращает объект инлайн-клавиатуры.
+    """
+
+    # Создаём объект клавиатуры
+    kb_builder = InlineKeyboardBuilder()
+
+    # Добавляем кнопку с ссылкой на канал
+    kb_builder.button(
+        text=LEXICON_RU['url_for_chanel'],
+        url=CHANEL_URL
+    )
+
+    return kb_builder.as_markup()
+
+
+def create_categories_keyboard(categories: list[dict]) -> InlineKeyboardMarkup:
 
     """
     Генерирует инлайн-клавиатуру из списка категорий.
@@ -43,22 +65,25 @@ def create_categories_keyboard(categories: list[str]) -> InlineKeyboardMarkup:
     kb_builder = InlineKeyboardBuilder()
 
     # Добавляем кнопки из категорий
-    for category in categories:
-        kb_builder.button(
-            text=category,
-            callback_data=f"category_{category}"
+    buttons = []
+    for idx, category in enumerate(categories, start=1):
+        buttons.append(
+            InlineKeyboardButton(
+                text=f'{idx}. {category["description"]}',
+                callback_data=f'category_{category["name"]}'
+            )
         )
 
-    # Указываем, что нужно по 2 кнопки в ряд
+    kb_builder.add(*buttons)
     kb_builder.adjust(2)
 
-    # Добавляем кнопку поиска
-    kb_builder.row(
-        InlineKeyboardButton(
-            text=COMMANDS['search_photo'],
-            callback_data='search_photo'
-        )
-    )
+    # # Добавляем кнопку поиска
+    # kb_builder.row(
+    #     InlineKeyboardButton(
+    #         text=COMMANDS['search_photo'],
+    #         callback_data='search_photo'
+    #     )
+    # )
 
     return kb_builder.as_markup()
 
@@ -79,6 +104,9 @@ def create_paginated_keyboard(current_page: int,
     # Добавляем кнопки для пагинации
     pagination_buttons = []
 
+    # Текущая страница из общего количества страниц
+    page_info = f"{current_page}/{total_pages}"
+
     # Проверяем, что мы не на первой странице
     if current_page > 1:
         # Добавляем кнопку "Предыдущая страница"
@@ -87,16 +115,14 @@ def create_paginated_keyboard(current_page: int,
             callback_data=f'page_{current_page - 1}')
         )
 
-    # Текущая страница из общего количества страниц
-    page_info = f"{current_page}/{total_pages}"
+    # Вставляем информацию о странице как кнопку
+    pagination_buttons.append(InlineKeyboardButton(
+        text=f'{current_page} из {total_pages}',
+        callback_data="page_info")
+    )
 
     # Проверяем, что мы не на последней странице
     if current_page < total_pages:
-        # Вставляем информацию о странице как кнопку
-        pagination_buttons.append(InlineKeyboardButton(
-            text=page_info,
-            callback_data="page_info")
-        )
         # Добавляем кнопку "Следующая страница"
         pagination_buttons.append(InlineKeyboardButton(
             text='▶',
@@ -106,6 +132,15 @@ def create_paginated_keyboard(current_page: int,
     # Создаём клавиатуру
     if pagination_buttons:
         kb_builder.row(*pagination_buttons)
+
+        if not current_page > 1:
+            # Добавляем кнопку назад
+            kb_builder.row(
+                InlineKeyboardButton(
+                    text=COMMANDS['move_back_to_category'],
+                    callback_data='move_back_to_category'
+                )
+            )
 
         kb_builder.row(
             InlineKeyboardButton(
@@ -117,10 +152,32 @@ def create_paginated_keyboard(current_page: int,
     return kb_builder.as_markup()
 
 
-def create_admins_keyboard() -> InlineKeyboardMarkup:
+def create_assembl_buttons(assembl: list[dict]) -> InlineKeyboardMarkup:
+
+    """
+
+    :param assembl:
+    :return: Возвращает объект инлайн-клавиатуры.
+    """
+
+    buttons = InlineKeyboardBuilder()
+
+    for item in assembl:
+        buttons.button(
+            text=item['description'],
+            callback_data=f'photo_{item["description"]}'
+        )
+
+    buttons.adjust(2)
+
+    return buttons.as_markup()
+
+
+def create_admins_keyboard(category: str | None) -> InlineKeyboardMarkup:
 
     """
     Генерирует инлайн-клавиатуру только для администраторов.
+    :param category: Название категории или None.
     :return: Возвращает объект инлайн-клавиатуры.
     """
 
@@ -129,16 +186,24 @@ def create_admins_keyboard() -> InlineKeyboardMarkup:
 
     # Добавляем кнопки "Удалить" и "Редактировать описание"
     kb_builder.button(
-        text=COMMANDS['delete_photo'],
-        callback_data='delete_photo'
+        text=COMMANDS['update_photo'],
+        callback_data='update_photo'
     )
     kb_builder.button(
         text=COMMANDS['update_description'],
         callback_data='update_description'
     )
+    kb_builder.button(
+        text=COMMANDS['delete_photo'],
+        callback_data='delete_photo'
+    )
+    kb_builder.button(
+        text=COMMANDS['move_back_in_category'],
+        callback_data=f'category_{category}'
+        )
 
-    # Указываем, что нужно по 2 кнопки в ряд
-    kb_builder.adjust(2)
+    # Указываем, что нужно по 3 кнопки в ряд
+    kb_builder.adjust(3)
 
     return kb_builder.as_markup()
 
