@@ -7,56 +7,85 @@ from aiogram import (
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums.parse_mode import ParseMode
 
-from handlers.bot_commands import bot_commands_router
-from handlers.group_handlers import bot_group_joined_router
-from handlers.user_handlers import bot_user_handlers_router
-from handlers.admin_handlers import bot_admins_handlers_router
-from keyboards.bot_menu import set_main_menu
+from bot_app.filters.transliterate_filter import TransliterationFilter
+from bot_app.middlewares.add_pool_in_handlers import DatabaseMiddleware
+from bot_app.handlers.bot_commands import bot_commands_router
+from bot_app.handlers.group_handlers import bot_group_joined_router
+from bot_app.handlers.user_handlers import bot_user_handlers_router
+from bot_app.handlers.admin_handlers import bot_admins_handlers_router
+from bot_app.keyboards.bot_menu import set_main_menu
 
 from config.config import BOT_TOKEN
 from config.database import (
     create_pool,
     close_pool
 )
+from config.log import logger
 
 
 async def main():
 
-    # Создание пулла подключений к БД
-    pool = await create_pool()
+    """
 
-    # Инициализация бота
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    dp = Dispatcher()
+    :return:
+    """
 
-    # Сохраняем объект Bot в Dispatcher
-    dp['bot'] = bot
+    # Инициализируем pool и bot перед try, чтобы можно было закрыть его в finally
+    pool = None
+    bot = None
 
-    # Передача пула в роутеры
-    bot_commands_router.message.middleware(lambda handler, data: {'pool': pool})
-    bot_group_joined_router.message.middleware(lambda handler, data: {'pool': pool})
-    bot_user_handlers_router.message.middleware(lambda handler, data: {'pool': pool})
-    bot_admins_handlers_router.message.middleware(lambda handler, data: {'pool': pool})
+    try:
+        # Создание пулла подключений к БД
+        pool = await create_pool()
 
-    # Регистрация кнопки menu
-    await set_main_menu(bot)
+        # Инициализация бота
+        bot = Bot(
+            token=BOT_TOKEN,
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
+        dp = Dispatcher()
 
-    # Регистрация хендлеров
-    dp.include_router(bot_commands_router)
-    dp.include_router(bot_group_joined_router)
-    dp.include_router(bot_user_handlers_router)
-    dp.include_router(bot_admins_handlers_router)
+        dp.update.middleware(DatabaseMiddleware(pool=pool))
 
-    # Запуск бота
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot)
+        # Сохраняем объект Bot в Dispatcher
+        dp['bot'] = bot
 
-    # Закрытие пула после завершения работы бота
-    await close_pool(pool)
+        # Регистрация кнопки menu
+        await set_main_menu(bot)
+
+        # bot_admins_handlers_router.message.filter(TransliterationFilter())
+        # bot_user_handlers_router.message.filter(TransliterationFilter())
+
+        # Регистрация хендлеров
+        dp.include_router(bot_commands_router)
+        dp.include_router(bot_admins_handlers_router)
+        dp.include_router(bot_user_handlers_router)
+        dp.include_router(bot_group_joined_router)
+
+        # Запуск бота
+        await bot.delete_webhook(drop_pending_updates=True)
+
+        print('Успешный запуск бота!')
+        logger.info('Успешный запуск бота!')
+
+        await dp.start_polling(bot)
+
+    except asyncio.CancelledError:
+        logger.info('Остановка бота...')
+    finally:
+        logger.info('Бот завершает работу...')
+
+        # Закрываем сессию бота, если он был создан
+        if bot:
+            await bot.session.close()
+
+        # Закрываем пул соединений с БД, если он был создан
+        if pool:
+            await close_pool(pool)
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info('Бот остановлен вручную!')
