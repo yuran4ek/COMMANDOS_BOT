@@ -1,3 +1,5 @@
+import json
+
 import asyncpg
 from typing import List, Dict
 
@@ -79,12 +81,12 @@ async def get_groups_from_db(pool: asyncpg.pool.Pool) -> List[int]:
     try:
         # Возвращаем список групп
         async with pool.acquire() as conn:
-            groups_id = await conn.fetch(
+            groups_id = await conn.fetchval(
                 "SELECT ARRAY_AGG(group_id) "
                 "FROM groups"
             )
             logger.info(f'Группы были успешно получены из БД: {groups_id}')
-            return groups_id or []
+            return groups_id if groups_id else []
     except asyncpg.PostgresError as e:
         logger.error(f'Ошибка взаимодействия с базой данных при получении групп: {e}')
         raise
@@ -122,6 +124,7 @@ async def delete_group_from_db(pool: asyncpg.pool.Pool,
 async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
                                         photo_id: str,
                                         description: str,
+                                        description_translit: str,
                                         category_name: str) -> None:
 
     """
@@ -129,6 +132,7 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
     :param pool: Пул соединения с БД.
     :param photo_id: ID фотографии из Telegram.
     :param description: Описание фотографии.
+    :param description_translit: Описание фотографии в переводе.
     :param category_name: Название категории, к которой относится фотография.
     :return: Функция ничего не возвращает.
     """
@@ -137,32 +141,41 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
         # Добавление фото с категорией в БД
         async with pool.acquire() as conn:
             async with conn.transaction():
+                # Добавление категории, если её нет, или получение её ID
+                category_id = await conn.fetchval(
+                    "INSERT INTO categories (category_name) " 
+                    "VALUES ($1) " 
+                    "ON CONFLICT (category_name) DO NOTHING " 
+                    "RETURNING id;",
+                    category_name
+                )
+                # Если категория уже была в БД, получаем её ID
+                if category_id is None:
+                    category_id = await conn.fetchval(
+                        "SELECT id "
+                        "FROM categories "
+                        "WHERE category_name = $1;",
+                        category_name
+                    )
                 # Добавляем фото или получаем его ID
-                photo_id_result = await conn.fetchval(
-                    "INSERT INTO photos (photo_id, description) "
-                    "VALUES ($1, $2) "
+                await conn.execute(
+                    "INSERT INTO photos (photo_id, description, description_translit, category_id) "
+                    "VALUES ($1, $2, $3, $4) "
                     "ON CONFLICT (photo_id) "
                     "DO UPDATE "
-                    "SET description = EXCLUDED.description "
-                    "RETURNING id;",
+                    "SET description = EXCLUDED.description, "
+                    "description_translit = EXCLUDED.description_translit, "
+                    "category_id = EXCLUDED.category_id ",
                     photo_id,
-                    description
-                )
-
-                # Добавляем категорию и связываем с фото
-                await conn.execute(
-                    "INSERT INTO categories (category_name, photo_id) "
-                    "VALUES ($1, $2) "
-                    "ON CONFLICT (category_name) DO UPDATE "
-                    "SET photo_id = EXCLUDED.photo_id;",
-                    category_name,
-                    photo_id_result
+                    description,
+                    description_translit,
+                    category_id
                 )
 
         logger.info(f'Фото "{description}" успешно добавлено в категорию "{category_name}"')
 
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка взаимодействия с базой данных: {e}')
+        logger.error(f'Ошибка при добавлении фото в БД: {e}')
     except Exception as e:
         logger.error(f'Произошла непредвиденная ошибка: {e}')
 
@@ -184,16 +197,32 @@ async def get_photos_from_db(pool: asyncpg.pool.Pool,
     try:
         # Получаем список фотографий с описанием
         async with pool.acquire() as conn:
+            # Получение category_id по названию категории
+            category_row = await conn.fetchrow(
+                "SELECT id "
+                "FROM categories "
+                "WHERE category_name = $1",
+                category
+            )
+            if not category_row:
+                logger.error(f'Категория "{category}" не найдена')
+                return []
+
+            category_id = category_row['id']
+
+            # Получение фото по category_id
             rows = await conn.fetch(
-                "SELECT photo_id, description "
+                "SELECT id, photo_id, description "
                 "FROM photos "
-                "WHERE category = $1 "
+                "WHERE category_id = $1 "
+                "ORDER BY id ASC "
                 "LIMIT $2 "
                 "OFFSET $3",
-                category,
+                category_id,
                 limit,
                 offset
             )
+
             photos = [dict(row) for row in rows]
             logger.info(f'Успешное получение фотографий: {photos}')
             return photos
@@ -216,15 +245,25 @@ async def get_total_photos_count(pool: asyncpg.pool.Pool,
     """
 
     try:
+        async with pool.acquire() as conn:
+            # Получение category_id по названию категории
+            category_row = await conn.fetchrow(
+                "SELECT id "
+                "FROM categories "
+                "WHERE category_name = $1",
+                category
+            )
+
+            category_id = category_row['id']
         # Получаем все фотографии по категории
         async with pool.acquire() as conn:
             result = await conn.fetchval(
                 "SELECT COUNT(*) "
                 "FROM photos "
-                "WHERE category = $1",
-                category
+                "WHERE category_id = $1",
+                category_id
             )
-            logger.info(f'Успешное получение всех фотографий по категории {category}')
+            logger.info(f'Успешное получение общего количества фотографий по категории {category}')
             return result
     except asyncpg.PostgresError as e:
         logger.error(f'Ошибка при получении количества фотографий: {e}')
@@ -254,16 +293,46 @@ async def get_photo_description_by_file_id_from_db(pool: asyncpg.pool.Pool,
             )
             if row:
                 description = row['description']
-                logger.info(f'Успешное получение описания: "{description}"')
+                logger.info(f'Успешное получение описания: "{description}" по file_id={file_id}')
                 return description
             else:
+                logger.warning(f'Описание не найдено по file_id={file_id}')
                 return 'Описания нет, пожалуйста, обратитесь к администратору.'
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при получении описания к фото: {e}')
+        logger.error(f'Ошибка при получении описания к фото по file_id={file_id}: {e}')
         raise
 
 
-async def get_categories_from_db(pool: asyncpg.pool.Pool) -> List[str]:
+async def get_photo_file_id_by_description_from_db(pool: asyncpg.pool.Pool,
+                                                   description: str) -> str:
+
+    """
+    Получение file_id из БД для фотографии по её описанию.
+    :param pool: Пул соединения с БД.
+    :param description: Описание фотографии.
+    :return: Возвращает строку с file_id фотографии или Описания нет, пожалуйста, обратитесь к администратору.
+    """
+
+    try:
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT photo_id "
+                "FROM photos "
+                "WHERE description = $1",
+                description
+            )
+            if row:
+                file_id = row['photo_id']
+                logger.info(f'Успешное получение file_id: "{file_id}"')
+                return file_id
+            else:
+                return 'file_id нет, пожалуйста, обратитесь к администратору.'
+    except asyncpg.PostgresError as e:
+        logger.error(f'Ошибка при получении file_id к фото: {e}')
+        raise
+
+
+async def get_categories_from_db(pool: asyncpg.pool.Pool) -> List[dict]:
 
     """
     Получение списка категорий.
@@ -273,12 +342,15 @@ async def get_categories_from_db(pool: asyncpg.pool.Pool) -> List[str]:
 
     try:
         async with pool.acquire() as conn:
-            category_name = await conn.fetch(
-                "SELECT ARRAY_AGG(category_name) "
+            categories_json = await conn.fetchval(
+                "SELECT JSON_AGG("
+                "JSONB_BUILD_OBJECT('name', category_name, 'description', category_description) "
+                "ORDER BY id ASC) "
                 "FROM categories",
             )
-            logger.info(f'Категории были успешно получены из БД: {category_name}')
-            return category_name or []
+            categories = json.loads(categories_json) if categories_json else []
+            logger.info(f'Категории были успешно получены из БД: {categories}')
+            return categories
     except asyncpg.PostgresError as e:
         logger.error(f'Ошибка взаимодействия с базой данных при получении категорий: {e}')
         raise
@@ -314,24 +386,62 @@ async def delete_photo_from_db(pool: asyncpg.pool.Pool,
         raise
 
 
-async def update_photo_description(pool: asyncpg.pool.Pool,
-                                   photo_id: str,
-                                   new_description: str) -> None:
+async def update_photo_in_db(pool: asyncpg.pool.Pool,
+                             photo_id: str,
+                             new_photo_id: str) -> None:
 
     """
-    Обновление описания для фото в БД.
+    Обновление фото в БД.
     :param pool: Пул соединений с БД.
     :param photo_id: ID фотографии для обновления.
-    :param new_description: новое описание для фотографии.
+    :param new_photo_id: Новое ID фотографии.
     :return: Функция ничего не возвращает.
     """
 
     try:
         async with pool.acquire() as conn:
             result = await conn.execute(
-                'UPDATE photos SET description = $1 '
+                'UPDATE photos '
+                'SET photo_id = $1 '
                 'WHERE photo_id = $2',
+                new_photo_id,
+                photo_id
+            )
+            # Если фото не найдено
+            if result == 'UPDATE 0':
+                logger.warning(f'Фото с ID {photo_id} не найдено в БД.')
+            else:
+                logger.info(f'Фото с ID {photo_id} успешно обновлено. Новое photo_id: {new_photo_id}.')
+    except asyncpg.PostgresError as e:
+        logger.error(f'Ошибка при обновлении фото с ID {photo_id}: {e}')
+        raise
+    except Exception as e:
+        logger.error(f'Ошибка при обновлении фото: {e}')
+
+
+async def update_photo_description(pool: asyncpg.pool.Pool,
+                                   photo_id: str,
+                                   new_description: str,
+                                   new_description_translit: str) -> None:
+
+    """
+    Обновление описания для фото в БД.
+    :param pool: Пул соединений с БД.
+    :param photo_id: ID фотографии для обновления.
+    :param new_description: Новое описание для фотографии.
+    :param new_description_translit: Новое описание для фотографии с переводом.
+    :return: Функция ничего не возвращает.
+    """
+
+    try:
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                'UPDATE photos '
+                'SET description = $1, '
+                'description_translit = $2 '
+                'WHERE photo_id = $3',
                 new_description,
+                new_description_translit,
                 photo_id
             )
             # Если фото не найдено
@@ -347,23 +457,29 @@ async def update_photo_description(pool: asyncpg.pool.Pool,
 
 
 async def search_photo_by_description_in_db(pool: asyncpg.pool.Pool,
+                                            category: str,
                                             query: str) -> List[Dict]:
 
     """
     Поиск фото по описанию в БД.
-    :param pool: Пул соединений с БД
-    :param query: Поисковой запрос
+    :param pool: Пул соединений с БД.
+    :param category: Категория для поиска.
+    :param query: Поисковой запрос.
     :return: Возвращение списка словарей найденных записей.
     """
 
     try:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                'SELECT description, category, photo_id '
-                'FROM photos '
-                'WHERE description ILIKE $1 '
-                'LIMIT 10',
-                f'%{query}%'
+                "SELECT description, description_translit, photo_id "
+                "FROM photos "
+                "JOIN categories "
+                "ON photos.category_id = categories.id "
+                "WHERE (description ILIKE $1 OR description_translit ILIKE $1) "
+                "AND categories.category_name = $2 "
+                "LIMIT 10",
+                f'%{query}%',
+                category
             )
         return [dict(row) for row in rows]
     except Exception as e:
