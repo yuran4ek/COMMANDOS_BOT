@@ -1,16 +1,25 @@
 import asyncpg.pool
+
 from aiogram import (
+    Bot,
     Router,
     types
 )
 from aiogram import filters
 from aiogram.fsm.context import FSMContext
 
-from bot_app.keyboards.keyboards import create_categories_keyboard
-from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
-from bot_app.states.user_states import SelectFromUserState
+from bot_app.keyboards.keyboards import (
+    create_categories_keyboard,
+    create_link_chanel_button
+)
 
-from config.database import get_categories_from_db
+from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
+from bot_app.utils.admin_check import check_is_admin
+
+from config.database import (
+    get_groups_from_db,
+    get_categories_from_db
+)
 from config.log import logger
 
 
@@ -30,36 +39,64 @@ async def cancel_handler(message: types.Message,
     """
 
     try:
-        # Получаем актуальное состояние из FSM
-        current_state = await state.get_state()
-        # Проверяем, если в состоянии ничего нет, то ничего не делаем
-        if current_state is None:
-            return None
         # Отправляем пользователю сообщение об отмене действия
         await message.answer(text=LEXICON_RU['cancel'])
         # Очищаем состояние для дальнейшего его использования
         await state.clear()
+        # Устанавливаем флаг True для сброса кнопок
+        await state.update_data(cancel_handler=True)
     except Exception as e:
         logger.error(f'Ошибка в обработке команды /cancel: {e}')
         await message.answer(LEXICON_RU['error'])
 
 
 @bot_commands_router.message(filters.Command('start'))
-async def start_command(message: types.Message):
+async def start_command(message: types.Message,
+                        bot: Bot,
+                        pool: asyncpg.pool.Pool):
 
     """
     Хендлер, срабатывающий на команду /start с параметрами.
     :param message: Сообщение от пользователя с командой /start.
+    :param bot: .
+    :param pool:
     :return: Функция ничего не возвращает.
     """
 
     try:
+        # Получаем данные о пользователе
+        user_id = message.from_user.id
+
+        # Получаем группы из БД
+        groups_id = await get_groups_from_db(pool=pool)
+
+        # Получаем категории из БД
+        categories = await get_categories_from_db(pool=pool)
+        category_name = ''
+        for name in categories:
+            category_name += f'{name.get("name")}\n'
+
+        # Проверяем, является ли пользователь администратором в одной из групп
+        is_admin = await check_is_admin(
+            bot=bot,
+            user_id=user_id,
+            groups_id=groups_id
+        )
+
+        text = f'{LEXICON_RU["/start"]}\n\n'
+
+        # Если админ
+        if is_admin:
+            text += f'{LEXICON_RU["info_for_admins"]}\n' \
+                    f'{category_name}'
+
         # Получаем параметр из команды /start
-        parameter = message.get_args()
+        parameter = message.text.split(maxsplit=1)[1] if len(message.text.split()) > 1 else None
         if parameter == 'welcome_to_private':
-            await message.answer(text=LEXICON_RU['/start'])
+            await message.answer(text=text)
         else:
-            await message.answer(text=LEXICON_RU['/start'])
+            await message.answer(text=text)
+
     except KeyError as e:
         logger.error(f'Ключ {e} отсутствует в LEXICON_RU')
         await message.answer(LEXICON_RU['error_key'])
@@ -68,7 +105,7 @@ async def start_command(message: types.Message):
         await message.answer(LEXICON_RU['error'])
 
 
-@bot_commands_router.message(filters.Command('сборки'))
+@bot_commands_router.message(filters.Command('assembl'))
 async def assembles_command(message: types.Message,
                             state: FSMContext,
                             pool: asyncpg.pool.Pool):
@@ -82,15 +119,88 @@ async def assembles_command(message: types.Message,
     """
 
     try:
+        # Устанавливаем флаг False для активации кнопок
+        await state.update_data(cancel_handler=False)
         # Получаем категории из БД
-        category_name = await get_categories_from_db(pool=pool)
+        categories = await get_categories_from_db(pool=pool)
+
+        keyboard = create_categories_keyboard(categories=categories)
+
         # Отправляем пользователю кнопки с категориями
         await message.answer(
-            text=LEXICON_RU['сборки'],
-            reply_markup=create_categories_keyboard(category_name)
-        )
-        # Переходим в состояния выбора категории пользователем
-        await state.set_state(SelectFromUserState.category)
+            text=LEXICON_RU['assembl'],
+            reply_markup=keyboard
+            )
     except Exception as e:
-        logger.error(f'Ошибка в обработке команды /сборки: {e}')
+        logger.error(f'Ошибка в обработке команды /assembl: {e}')
+        await message.answer(LEXICON_RU['error'])
+
+
+@bot_commands_router.message(filters.Command('help'))
+async def assembles_command(message: types.Message,
+                            bot: Bot,
+                            pool: asyncpg.pool.Pool
+                            ):
+
+    """
+    Хендлер, срабатывающий на команду /сборки.
+    :param message: Сообщение от пользователя с командой сборки.
+    :param bot: .
+    :param pool:
+    :return: Функция ничего не возвращает.
+    """
+
+    try:
+        # Получаем данные о пользователе
+        user_id = message.from_user.id
+
+        # Получаем группы из БД
+        groups_id = await get_groups_from_db(pool=pool)
+
+        # Получаем категории из БД
+        categories = await get_categories_from_db(pool=pool)
+
+        category_name = ''
+        for name in categories:
+            category_name += f'🔹 {name.get("name")} - {name.get("description")}\n'
+
+        # Проверяем, является ли пользователь администратором в одной из групп
+        is_admin = await check_is_admin(
+            bot=bot,
+            user_id=user_id,
+            groups_id=groups_id
+        )
+
+        text = f'{LEXICON_RU["/help"]}\n\n'
+
+        # Если админ
+        if is_admin:
+            text += f'{LEXICON_RU["info_for_admins"]}\n' \
+                    f'{category_name}'
+
+        # Отправляем пользователю сообщение с помощью
+        await message.answer(text=text)
+
+    except Exception as e:
+        logger.error(f'Ошибка в обработке команды /help: {e}')
+        await message.answer(LEXICON_RU['error'])
+
+
+@bot_commands_router.message(filters.Command('commandos'))
+async def cancel_handler(message: types.Message):
+
+    """
+    Хендлер, срабатывающий на команду /COMMANDOS.
+    :param message: Сообщение от пользователя с командой /COMMANDOS.
+    :return: Функция ничего не возвращает.
+    """
+
+    try:
+        # Отправляем пользователю сообщение об отмене действия
+        await message.answer(
+            text=LEXICON_RU['text_for_url_for_chanel'],
+            reply_markup=create_link_chanel_button()
+        )
+    except Exception as e:
+        logger.error(f'Ошибка в обработке команды /COMMANDOS: {e}')
         await message.answer(LEXICON_RU['error'])
