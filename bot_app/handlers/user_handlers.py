@@ -1,10 +1,9 @@
 import math
-import re
 
 import asyncpg.pool
 from aiogram import (
     Router,
-    Dispatcher,
+    Bot,
     F
 )
 from aiogram.types import (
@@ -12,21 +11,24 @@ from aiogram.types import (
     CallbackQuery
 )
 from aiogram.fsm.context import FSMContext
+from aiogram.utils.keyboard import InlineKeyboardMarkup
 
-from bot_app.filters.transliterate_filter import TransliterationFilter
 from bot_app.keyboards.keyboards import (
     create_paginated_keyboard,
-    create_admins_keyboard
+    create_categories_keyboard,
+    create_admins_keyboard,
+    create_assembl_buttons
 )
 from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
-from bot_app.states.user_states import SearchPhotoState
+from bot_app.states.user_states import (SearchPhotoState)
 from bot_app.utils.admin_check import check_is_admin
 
 from config.database import (
     get_groups_from_db,
+    get_categories_from_db,
     get_photos_from_db,
     get_total_photos_count,
-    get_photo_description_by_file_id_from_db,
+    get_photo_file_id_by_description_from_db,
     search_photo_by_description_in_db
 )
 from config.log import logger
@@ -36,46 +38,73 @@ from config.log import logger
 bot_user_handlers_router = Router(name='bot_user_handlers_router')
 
 
-@bot_user_handlers_router.message(SearchPhotoState.search_photo,
-                                  TransliterationFilter)
+@bot_user_handlers_router.message(SearchPhotoState.search_photo)
 async def search_photo_handler(message: Message,
                                state: FSMContext,
+                               bot: Bot,
                                pool: asyncpg.pool.Pool):
 
     """
     Хендлер, срабатывающий по состоянию поиска фото из FSM.
     :param message: Сообщение от пользователя.
     :param state: Состояние пользователя для FSM.
+    :param bot: .
     :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
     try:
-        # Преобразуем текст, если он на кириллице
-        transformed_description = getattr(message, 'transliterated_text', message.text)
+        # Получаем ID пользователя
+        user_id = message.from_user.id
+
+        # Получаем группы из БД
+        groups_id = await get_groups_from_db(pool=pool)
+
+        # Получаем категорию из словаря data
+        data = await state.get_data()
+        category = data.get('category')
+
+        # Проверяем, является ли пользователь администратором
+        is_admin = await check_is_admin(
+            bot=bot,
+            user_id=user_id,
+            groups_id=groups_id
+        )
+
         # Выполняем поиск фото в БД по описанию от пользователя
         search_photo = await search_photo_by_description_in_db(
             pool=pool,
-            query=transformed_description
+            category=category,
+            query=message.text
         )
         # Если фото не найдено в БД
         if not search_photo:
             # Уведомляем пользователя о том, что ничего не найдено
             await message.answer(text=LEXICON_RU['photo_not_found'])
             return
+
         # Если фото найдено в БД
         else:
             for photo in search_photo:
                 # Получаем данные фото
                 photo_id = photo['photo_id']
                 description = photo['description']
-                category = photo['category']
-                # Отправляем пользователю все найденные фото с описанием и категорией
-                await message.answer_photo(
-                    photo=photo_id,
-                    caption=f'{LEXICON_RU["photo_found"]} {description} из категории {category}'
-                )
-            # Очищаем состояние для дальнейшего его использования
-            await state.clear()
+                if is_admin:
+                    # Отправляем пользователю все найденные фото с описанием, категорией и клавиатурой
+                    await message.answer_photo(
+                        photo=photo_id,
+                        caption=f'{LEXICON_RU["photo_found"]} {description}',
+                        reply_markup=create_admins_keyboard(category=category)
+                    )
+                else:
+                    # Отправляем пользователю все найденные фото с описанием и категорией
+                    await message.answer_photo(
+                        photo=photo_id,
+                        caption=f'{LEXICON_RU["photo_found"]} {description}',
+                        reply_markup=None
+                        )
+                    # Очищаем состояние для дальнейшего его использования
+                    await state.clear()
+
     except Exception as e:
         logger.error(f'Ошибка при обработке сообщения от пользователя при поиске фото: {e}')
         await message.answer(LEXICON_RU['error'])
@@ -83,24 +112,79 @@ async def search_photo_handler(message: Message,
 
 @bot_user_handlers_router.callback_query(F.data == 'search_photo')
 async def search_photo_callback(callback: CallbackQuery,
-                                state: FSMContext):
+                                state: FSMContext,
+                                pool: asyncpg.pool.Pool):
 
     """
     Хендлер, срабатывающий на команду с кнопки "Поиск".
     :param callback: CallbackQuery от пользователя с параметром поиска.
     :param state: Состояние пользователя для FSM.
+    :param pool:
     :return: Функция ничего не возвращает.
     """
 
     try:
-        # Отправляем пользователю сообщение с инструкцией по поиску фото
-        await callback.message.answer(text=LEXICON_RU['search_photo'])
-        # Убираем "часики"
-        await callback.answer()
-        # Переходим в состояние FSM для поиска фото
-        await state.set_state(SearchPhotoState.search_photo)
+        # Проверяем, не вызвана ли команда /cancel
+        data = await state.get_data()
+        if not data.get('cancel_handler'):
+
+            # Получаем категорию из словаря data
+            data = await state.get_data()
+            category_data = data.get('category')
+            categories = await get_categories_from_db(pool=pool)
+            category = next((item['description'] for item in categories if item['name'] == category_data), None)
+
+            # Отправляем пользователю сообщение с инструкцией по поиску фото
+            await callback.message.edit_text(
+                text=f'{LEXICON_RU["search_photo"]} {category}',
+                reply_markup=None
+            )
+            # Убираем "часики"
+            await callback.answer()
+            # Переходим в состояние FSM для поиска фото
+            await state.set_state(SearchPhotoState.search_photo)
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
     except Exception as e:
         logger.error(f'Ошибка при обработке кнопки поиска: {e}')
+        await callback.message.answer(LEXICON_RU['error'])
+
+
+@bot_user_handlers_router.callback_query(F.data.startswith('move_back_to_category'))
+async def move_back_to_category_callback(callback: CallbackQuery,
+                                         state: FSMContext,
+                                         pool: asyncpg.pool.Pool):
+
+    """
+    Хендлер, срабатывающий на команду с кнопки "Вернуться к категориям".
+    :param callback: CallbackQuery от пользователя с параметром о категории.
+    :param state: Состояние пользователя для FSM.
+    :param pool: Пул соединения с БД.
+    :return: Функция ничего не возвращает.
+    """
+
+    try:
+        # Проверяем, не вызвана ли команда /cancel
+        data = await state.get_data()
+        if not data.get('cancel_handler'):
+            # Устанавливаем флаг False для активации кнопок
+            await state.update_data(cancel_handler=False)
+            # Получаем категории из БД
+            categories = await get_categories_from_db(pool=pool)
+
+            keyboard = create_categories_keyboard(categories=categories)
+
+            # Отправляем пользователю кнопки с категориями
+            await callback.message.edit_text(
+                text=LEXICON_RU['assembl'],
+                reply_markup=keyboard
+                )
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
+    except Exception as e:
+        logger.error(f'Ошибка при обработке кнопки "Назад": {e}')
         await callback.message.answer(LEXICON_RU['error'])
 
 
@@ -118,50 +202,79 @@ async def category_selection_callback(callback: CallbackQuery,
     """
 
     try:
-        # Получаем выбранную пользователем категорию
-        category = callback.data.replace('category_', '')
+        # Проверяем, не вызвана ли команда /cancel
+        data = await state.get_data()
+        if not data.get('cancel_handler'):
+            # Получаем выбранную пользователем категорию
+            category = callback.data.replace('category_', '')
 
-        # Устанавливаем начальную страницу и значения для пагинации о максимальном выводе элементов на странице
-        current_page = 1
-        items_per_page = 5
+            # Устанавливаем начальную страницу и значения для пагинации о максимальном выводе элементов на странице
+            current_page = 1
+            items_per_page = 6
 
-        # Обновляем данные в словаре data, добавляя информацию о выбранной категории и текущей странице
-        await state.update_data(
-            category=category,
-            current_page=current_page
-        )
+            # Обновляем данные в словаре data, добавляя информацию о выбранной категории и текущей странице
+            await state.update_data(
+                category=category,
+                current_page=current_page
+            )
 
-        # Получаем список сборок по категории и с пагинацией
-        builds = await get_photos_from_db(
-            pool=pool,
-            category=category,
-            limit=items_per_page,
-            offset=(current_page - 1) * items_per_page
-        )
-        # Получаем общее количество доступных сборок по данной категории
-        total_builds = await get_total_photos_count(
-            pool=pool,
-            category=category
-        )
+            # Получаем список сборок по категории и с пагинацией
+            assembl = await get_photos_from_db(
+                pool=pool,
+                category=category,
+                limit=items_per_page,
+                offset=(current_page - 1) * items_per_page
+            )
 
-        # Рассчитываем общее количество страниц
-        total_pages = math.ceil(total_builds / items_per_page)
+            # Получаем общее количество доступных сборок по данной категории
+            total_builds = await get_total_photos_count(
+                pool=pool,
+                category=category
+            )
 
-        # Формируем сообщение с нумерацией сборок
-        message_text = f'Выберите сборку из категории {category}:\n'
-        for idx, build in enumerate(builds, start=1):
-            message_text += f'{idx}. <a href="{build["photo_id"]}">{build["description"]}</a>\n'
+            # Рассчитываем общее количество страниц
+            total_pages = math.ceil(total_builds / items_per_page)
 
-        # Отправляем пользователю страницу со сборками и кнопками пагинации
-        await callback.message.edit_text(
-            text=message_text,
-            reply_markup=create_paginated_keyboard(
+            # Генерируем клавиатуру со сборками
+            assembl_kb = create_assembl_buttons(assembl=assembl)
+
+            # Генерируем клавиатуру с пагинацией
+            pagination_kb = create_paginated_keyboard(
                 current_page=current_page,
                 total_pages=total_pages
             )
-        )
+
+            # Формируем сообщение с нумерацией сборок
+            message_text = f'Выберите сборку из категории {category}:\n'
+
+            if not assembl:
+                # Отправляем сообщение о том, что сборок в категории нет
+                await callback.message.edit_text(
+                    text=LEXICON_RU['empty_category'],
+                )
+            else:
+                # Если сообщение с фото
+                if callback.message.photo:
+                    await callback.message.delete()
+                    await callback.message.answer(
+                        text=message_text,
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=assembl_kb.inline_keyboard + pagination_kb.inline_keyboard
+                        )
+                    )
+                else:
+                    # Отправляем пользователю страницу со сборками и кнопками пагинации
+                    await callback.message.edit_text(
+                        text=message_text,
+                        reply_markup=InlineKeyboardMarkup(
+                            inline_keyboard=assembl_kb.inline_keyboard + pagination_kb.inline_keyboard
+                        )
+                    )
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
     except Exception as e:
-        logger.error(f'Ошибка при обработке категории: {e}')
+        logger.error(f'Ошибка при получении сборок по категории: {e}')
         await callback.message.answer(text=LEXICON_RU['error'])
 
 
@@ -179,113 +292,144 @@ async def process_pagination_callback(callback: CallbackQuery,
     """
 
     try:
-        # Получаем словарь с состоянием категории и кнопки пагинации
+        # Проверяем, не вызвана ли команда /cancel
         data = await state.get_data()
+        if not data.get('cancel_handler'):
+            # Получаем словарь с состоянием категории и кнопки пагинации
+            data = await state.get_data()
 
-        # Извлекаем номер страницы, если пусто, то устанавливаем 1
-        current_page = data.get('current_page', 1)
+            # Извлекаем номер страницы, если пусто
+            current_page = int(callback.data.split('_')[1])
 
-        # Извлекаем категорию
-        category = data.get('category')
+            # Извлекаем категорию
+            category = data.get('category')
 
-        # Задаём общее количество элементов на странице
-        items_per_page = 5
+            # Задаём общее количество элементов на странице
+            items_per_page = 6
 
-        # Получаем список сборок по категории и с пагинацией
-        builds = await get_photos_from_db(
-            pool=pool,
-            category=category,
-            limit=items_per_page,
-            offset=(current_page - 1) * items_per_page
-        )
+            # Получаем список сборок по категории и с пагинацией
+            assembl = await get_photos_from_db(
+                pool=pool,
+                category=category,
+                limit=items_per_page,
+                offset=(current_page - 1) * items_per_page
+            )
 
-        # Получаем общее количество доступных сборок по данной категории
-        total_builds = await get_total_photos_count(
-            pool=pool,
-            category=category
-        )
+            # Получаем общее количество доступных сборок по данной категории
+            total_builds = await get_total_photos_count(
+                pool=pool,
+                category=category
+            )
 
-        # Рассчитываем общее количество страниц
-        total_pages = math.ceil(total_builds / items_per_page)
+            # Рассчитываем общее количество страниц
+            total_pages = math.ceil(total_builds / items_per_page)
 
-        # Формируем сообщение с нумерацией сборок
-        message_text = f'Выберите сборку из категории {category}:\n'
-        for idx, build in enumerate(builds, start=1):
-            message_text += f'{idx}. <a href="{build["photo_id"]}">{build["description"]}</a>\n'
+            # Генерируем клавиатуру со сборками
+            assembl_kb = create_assembl_buttons(assembl=assembl)
 
-        # Обновляем состояние с текущей страницей
-        await state.update_data(current_page=current_page)
-
-        # Отправляем пользователю страницу со сборками и кнопками пагинации
-        await callback.message.edit_text(
-            text=message_text,
-            reply_markup=create_paginated_keyboard(
+            # Генерируем клавиатуру с пагинацией
+            pagination_kb = create_paginated_keyboard(
                 current_page=current_page,
                 total_pages=total_pages
             )
-        )
+
+            # Формируем сообщение с нумерацией сборок
+            message_text = f'Выберите сборку из категории {category}:\n'
+
+            # Обновляем состояние с текущей страницей
+            await state.update_data(current_page=current_page)
+
+            # Отправляем пользователю страницу со сборками и кнопками пагинации
+            await callback.message.edit_text(
+                text=message_text,
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=assembl_kb.inline_keyboard + pagination_kb.inline_keyboard
+                )
+            )
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
     except Exception as e:
         logger.error(f'Ошибка при переходе на новую страницу: {e}')
         await callback.message.answer(text=LEXICON_RU['error'])
 
 
-@bot_user_handlers_router.message()
-async def send_photo_handler(message: Message,
-                             dp: Dispatcher,
+@bot_user_handlers_router.callback_query(F.data.startswith('photo_'))
+async def send_photo_handler(callback: CallbackQuery,
+                             bot: Bot,
                              state: FSMContext,
                              pool: asyncpg.pool.Pool):
 
     """
     Хендлер, срабатывающий на переход по ссылке из сообщения со сборками.
-    :param message: Сообщение от пользователя.
-    :param dp: Объект Dispatcher.
+    :param callback: Сообщение от пользователя.
+    :param bot: Объект Bot.
     :param state: Состояние пользователя дл FSM.
     :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
 
-    # Получаем данные о пользователе
-    user_id = message.from_user.id
-    # Получаем группы из БД
-    groups_id = await get_groups_from_db(pool=pool)
-
     try:
-        # Проверяем, содержится ли ссылка на фото в сообщении от пользователя
-        match = re.search(r'AgACAgIAAxkBAAEB[\dA-Za-z_-]+', message.text)
+        # Проверяем, не вызвана ли команда /cancel
+        data = await state.get_data()
+        if not data.get('cancel_handler'):
+            # Получаем данные о пользователе
+            user_id = callback.from_user.id
 
-        # Если содержится
-        if match:
-            # Извлекаем file_id
-            photo_id = match.group(0)
+            # Получаем группы из БД
+            groups_id = await get_groups_from_db(pool=pool)
+
+            caption = callback.data.replace("photo_", "")
+
+            # Получаем категорию из словаря data
+            category = data.get('category')
+
+            # Отправляем запрос в FastAPI для извлечения file_id
+            photo_id = await get_photo_file_id_by_description_from_db(
+                pool=pool,
+                description=caption
+            )
+
+            if not photo_id:
+                await callback.message.edit_text(text=LEXICON_RU['error'])
+                return
 
             # Получаем описание из базы данных по file_id
-            description = LEXICON_RU['photo_found'] + await get_photo_description_by_file_id_from_db(
-                pool=pool,
-                file_id=photo_id
+            description = LEXICON_RU['photo_found'] + caption
+
+            # Проверяем, является ли пользователь администратором в одной из групп
+            is_admin = await check_is_admin(
+                bot=bot,
+                user_id=user_id,
+                groups_id=groups_id
             )
 
             # Если пользователь не администратор
-            if not await check_is_admin(
-                dp=dp,
-                user_id=user_id,
-                groups_id=groups_id
-            ):
+            if not is_admin:
+                # Удаляем предыдущее сообщение
+                await callback.message.delete()
                 # Отправляем фотографию с описанием
-                await message.answer_photo(
-                    photo_id,
+                await callback.message.answer_photo(
+                    photo=photo_id,
                     caption=description
                 )
 
                 # Очищаем состояние для дальнейшего его использования
                 await state.clear()
             else:
+                # Удаляем предыдущее сообщение
+                await callback.message.delete()
+                # Сохраняем file_id в FSM
+                await state.update_data(photo_id=photo_id)
                 # Отправляем фотографию с описанием и кнопками "Удалить" и "Изменить описание"
-                await message.answer_photo(
-                    photo_id,
+                await callback.message.answer_photo(
+                    photo=photo_id,
                     caption=description,
-                    reply_markup=create_admins_keyboard()
+                    reply_markup=create_admins_keyboard(category=category)
                 )
-
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
     except Exception as e:
         logger.error(f'Ошибка при обработке сообщения от пользователя с ссылкой на фото: {e}')
-        await message.answer(text=LEXICON_RU['error'])
+        await callback.message.edit_text(text=LEXICON_RU['error'])
