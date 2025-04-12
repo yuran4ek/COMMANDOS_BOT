@@ -13,3 +13,6 @@ DATABASE_URL = os.getenv('DATABASE_URL')
 
 # URL для отправки команды /start в ссылке на бота
 BOT_URL_FOR_START = os.getenv('BOT_URL_FOR_START')
+
+# URL для перехода в канал COMMANDOS
+CHANEL_URL = os.getenv('CHANEL_URL')
