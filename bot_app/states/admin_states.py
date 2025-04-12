@@ -11,3 +11,13 @@ class AdminUpdateDescriptionState(StatesGroup):
     """
 
     update_description = State()
+    update_photo = State()
+
+
+class AdminAddPhotoState(StatesGroup):
+
+    """
+    Класс для хранения состояния при добавлении фото администратором.
+    """
+
+    add_photo = State()
