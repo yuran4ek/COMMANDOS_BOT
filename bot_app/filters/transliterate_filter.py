@@ -27,33 +27,45 @@ class TransliterationFilter(BaseFilter):
     Класс для преобразования текста из кириллицы в латиницу.
     """
 
-    key = 'transliterate'
+    def __init__(self, mode: str):
 
-    # Инициализируем переменную transliterate
-    def __init__(self, transliterate):
-        self.transliterate = transliterate
+        """
+        Передача параметра mode в __init__ для использования в фильтре.
+        :param mode: Режим работы фильтра, например при добавлении или изменении описания фотографии.
+        """
+        self.mode = mode
 
-    # Функция для преобразования текста из кириллицы в латиницу
-    async def check(self, message):
-        user_input = getattr(message, 'text', '').strip() if message.text else None
-        if not user_input:
-            return False
+    async def __call__(self, message) -> dict[str, str]:
+        user_input = (message.text or message.caption or "").strip()
 
         # Определяем язык введённого сообщения
         language = detect_language(text=user_input)
+        if self.mode == 'add':
+            user_input_separate = ' '.join(user_input.split(' ')[1::])
+        else:
+            user_input_separate = user_input
+
+        # Если язык - кириллица
         if language == 'cyrillic':
             # Добавляем трансформированный текст в объект message
-            message.transliterated_text = translit(
-                user_input,
+            translit_text = translit(
+                user_input_separate,
                 language_code='ru',
                 reversed=True
             )
-            return True
+        # Если язык - латиница
         elif language == 'latin':
-            message.transliterated_text = user_input
-            return True
+            # Добавляем трансформированный текст в объект message
+            translit_text = translit(
+                user_input_separate,
+                language_code='ru',
+                reversed=False
+            )
+        else:
+            # Если язык не определён
+            return {'description': user_input_separate}
 
-        return False
-
-    async def __call__(self, message):
-        return await self.check(message)
+        return {
+            'description': user_input_separate,
+            'description_translit': translit_text
+        }
