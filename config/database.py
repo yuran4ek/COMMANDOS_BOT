@@ -183,7 +183,7 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
 async def get_photos_from_db(pool: asyncpg.pool.Pool,
                              category: str,
                              limit: int,
-                             offset: int) -> List[Dict]:
+                             offset: int) -> list[dict]:
 
     """
     Получение списка фотографий с пагинацией.
@@ -332,7 +332,7 @@ async def get_photo_file_id_by_description_from_db(pool: asyncpg.pool.Pool,
         raise
 
 
-async def get_categories_from_db(pool: asyncpg.pool.Pool) -> List[dict]:
+async def get_categories_from_db(pool: asyncpg.pool.Pool) -> list[dict]:
 
     """
     Получение списка категорий.
@@ -458,7 +458,7 @@ async def update_photo_description(pool: asyncpg.pool.Pool,
 
 async def search_photo_by_description_in_db(pool: asyncpg.pool.Pool,
                                             category: str,
-                                            query: str) -> List[Dict]:
+                                            query: str) -> list[dict]:
 
     """
     Поиск фото по описанию в БД.

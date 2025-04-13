@@ -8,6 +8,7 @@ load_dotenv()
 
 # Токен бота из Telegram
 BOT_TOKEN = os.getenv('BOT_TOKEN')
+
 # Путь к БД
 DATABASE_URL = os.getenv('DATABASE_URL')
 
