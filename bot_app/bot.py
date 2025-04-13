@@ -7,7 +7,6 @@ from aiogram import (
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums.parse_mode import ParseMode
 
-from bot_app.filters.transliterate_filter import TransliterationFilter
 from bot_app.middlewares.add_pool_in_handlers import DatabaseMiddleware
 from bot_app.handlers.bot_commands import bot_commands_router
 from bot_app.handlers.group_handlers import bot_group_joined_router
@@ -26,8 +25,8 @@ from config.log import logger
 async def main():
 
     """
-
-    :return:
+    Запуск бота.
+    :return: Функция ничего не возвращает.
     """
 
     # Инициализируем pool и bot перед try, чтобы можно было закрыть его в finally
@@ -52,9 +51,6 @@ async def main():
 
         # Регистрация кнопки menu
         await set_main_menu(bot)
-
-        # bot_admins_handlers_router.message.filter(TransliterationFilter())
-        # bot_user_handlers_router.message.filter(TransliterationFilter())
 
         # Регистрация хендлеров
         dp.include_router(bot_commands_router)
