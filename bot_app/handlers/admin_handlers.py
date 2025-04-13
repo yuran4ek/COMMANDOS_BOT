@@ -247,7 +247,7 @@ async def process_update_photo_description(callback: CallbackQuery,
     Хендлер, срабатывающий на команду с кнопки "Изменить описание".
     :param callback: CallbackQuery от пользователя с параметрами для изменений описания.
     :param state: Состояние пользователя для FSM.
-    :param pool:
+    :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
 
@@ -271,9 +271,6 @@ async def process_update_photo_description(callback: CallbackQuery,
                 pool=pool,
                 file_id=photo_id
             )
-
-            print(f'file_id: {callback.message.photo[-1].file_id}')
-            print(f'description: {description}')
 
             # редактируем описание для фотографии
             await callback.message.edit_caption(
@@ -343,7 +340,7 @@ async def process_confirm_callback(callback: CallbackQuery,
 
     """
     Хендлер, срабатывающий на нажатие кнопок "Да" или "Нет"
-    для добавления фото, удаления фото и изменения описания для фото
+    для добавления фото, удаления фото и изменения описания для фото.
     :param callback: CallbackQuery от пользователя с параметрами
     для подтверждения добавления, удаления или редактирования описания фотографии.
     :param state: Состояние пользователя для FSM.
@@ -462,6 +459,7 @@ async def process_confirm_callback(callback: CallbackQuery,
                 )
                 # Очищаем состояние для дальнейшего его использования
                 await state.clear()
+
         # Обработка команды на замену фото
         elif command == 'replace':
             # Получаем новый photo_id, категорию и описание для фото

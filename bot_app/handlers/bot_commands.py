@@ -58,8 +58,8 @@ async def start_command(message: types.Message,
     """
     Хендлер, срабатывающий на команду /start с параметрами.
     :param message: Сообщение от пользователя с командой /start.
-    :param bot: .
-    :param pool:
+    :param bot:Объект Bot.
+    :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
 
@@ -145,8 +145,8 @@ async def assembles_command(message: types.Message,
     """
     Хендлер, срабатывающий на команду /сборки.
     :param message: Сообщение от пользователя с командой сборки.
-    :param bot: .
-    :param pool:
+    :param bot: Объект Bot.
+    :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
 

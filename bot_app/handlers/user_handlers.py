@@ -48,7 +48,7 @@ async def search_photo_handler(message: Message,
     Хендлер, срабатывающий по состоянию поиска фото из FSM.
     :param message: Сообщение от пользователя.
     :param state: Состояние пользователя для FSM.
-    :param bot: .
+    :param bot: Объект Bot.
     :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
@@ -119,7 +119,7 @@ async def search_photo_callback(callback: CallbackQuery,
     Хендлер, срабатывающий на команду с кнопки "Поиск".
     :param callback: CallbackQuery от пользователя с параметром поиска.
     :param state: Состояние пользователя для FSM.
-    :param pool:
+    :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
 
@@ -298,8 +298,13 @@ async def process_pagination_callback(callback: CallbackQuery,
             # Получаем словарь с состоянием категории и кнопки пагинации
             data = await state.get_data()
 
-            # Извлекаем номер страницы, если пусто
-            current_page = int(callback.data.split('_')[1])
+            # Извлекаем номер страницы
+            current_page = callback.data.split('_')[1]
+            if current_page == 'info':
+                await callback.answer()
+                return
+            else:
+                current_page = int(current_page)
 
             # Извлекаем категорию
             category = data.get('category')
@@ -364,7 +369,7 @@ async def send_photo_handler(callback: CallbackQuery,
     Хендлер, срабатывающий на переход по ссылке из сообщения со сборками.
     :param callback: Сообщение от пользователя.
     :param bot: Объект Bot.
-    :param state: Состояние пользователя дл FSM.
+    :param state: Состояние пользователя для FSM.
     :param pool: Пул соединения с БД.
     :return: Функция ничего не возвращает.
     """
