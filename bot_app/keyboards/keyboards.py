@@ -77,14 +77,6 @@ def create_categories_keyboard(categories: list[dict]) -> InlineKeyboardMarkup:
     kb_builder.add(*buttons)
     kb_builder.adjust(2)
 
-    # # Добавляем кнопку поиска
-    # kb_builder.row(
-    #     InlineKeyboardButton(
-    #         text=COMMANDS['search_photo'],
-    #         callback_data='search_photo'
-    #     )
-    # )
-
     return kb_builder.as_markup()
 
 
@@ -103,9 +95,6 @@ def create_paginated_keyboard(current_page: int,
 
     # Добавляем кнопки для пагинации
     pagination_buttons = []
-
-    # Текущая страница из общего количества страниц
-    page_info = f"{current_page}/{total_pages}"
 
     # Проверяем, что мы не на первой странице
     if current_page > 1:
@@ -155,8 +144,8 @@ def create_paginated_keyboard(current_page: int,
 def create_assembl_buttons(assembl: list[dict]) -> InlineKeyboardMarkup:
 
     """
-
-    :param assembl:
+    Генерирует инлайн-клавиатуру со сборками.
+    :param assembl: Список со сборками.
     :return: Возвращает объект инлайн-клавиатуры.
     """
 
