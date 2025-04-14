@@ -217,12 +217,9 @@ async def process_delete_photo_callback(callback: CallbackQuery,
                 raise Exception
 
             # Получаем file_id для данного фото
-            photo_id = callback.message.photo[-1].file_id
+            photo_id = data.get('photo_id')
 
-            # Сохраняем file_id
-            await state.update_data(photo_id=photo_id)
-
-            # Редактируем photo_id для фотографии
+            # Редактируем описание под фотографией
             await callback.message.edit_caption(
                 caption=LEXICON_RU['update_photo'],
                 reply_markup=None

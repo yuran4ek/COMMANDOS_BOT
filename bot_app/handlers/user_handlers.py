@@ -76,34 +76,46 @@ async def search_photo_handler(message: Message,
             category=category,
             query=message.text
         )
+
+        # Если фото найдено в БД
+        if search_photo:
+            if len(search_photo) > 1:
+                await message.answer(
+                    text=LEXICON_RU['search_result'],
+                    reply_markup=create_assembl_buttons(assembl=search_photo)
+                )
+            else:
+                for photo in search_photo:
+                    # Получаем данные фото
+                    photo_id = photo['photo_id']
+                    description = photo['description']
+
+                    if is_admin:
+                        # Отправляем пользователю все найденные фото с описанием, категорией и клавиатурой
+                        await message.answer_photo(
+                            photo=photo_id,
+                            caption=f'{LEXICON_RU["photo_found"]} {description}',
+                            reply_markup=create_admins_keyboard(category=category)
+                        )
+                        await state.update_data(
+                            photo_id=photo_id,
+                            description=description
+                        )
+
+                    else:
+                        # Отправляем пользователю все найденные фото с описанием и категорией
+                        await message.answer_photo(
+                            photo=photo_id,
+                            caption=f'{LEXICON_RU["photo_found"]} {description}',
+                            reply_markup=None
+                        )
+                        # Очищаем состояние для дальнейшего его использования
+                        await state.clear()
         # Если фото не найдено в БД
-        if not search_photo:
+        else:
             # Уведомляем пользователя о том, что ничего не найдено
             await message.answer(text=LEXICON_RU['photo_not_found'])
             return
-
-        # Если фото найдено в БД
-        else:
-            for photo in search_photo:
-                # Получаем данные фото
-                photo_id = photo['photo_id']
-                description = photo['description']
-                if is_admin:
-                    # Отправляем пользователю все найденные фото с описанием, категорией и клавиатурой
-                    await message.answer_photo(
-                        photo=photo_id,
-                        caption=f'{LEXICON_RU["photo_found"]} {description}',
-                        reply_markup=create_admins_keyboard(category=category)
-                    )
-                else:
-                    # Отправляем пользователю все найденные фото с описанием и категорией
-                    await message.answer_photo(
-                        photo=photo_id,
-                        caption=f'{LEXICON_RU["photo_found"]} {description}',
-                        reply_markup=None
-                        )
-                    # Очищаем состояние для дальнейшего его использования
-                    await state.clear()
 
     except Exception as e:
         logger.error(f'Ошибка при обработке сообщения от пользователя при поиске фото: {e}')
@@ -245,7 +257,7 @@ async def category_selection_callback(callback: CallbackQuery,
             )
 
             # Формируем сообщение с нумерацией сборок
-            message_text = f'Выберите сборку из категории {category}:\n'
+            message_text = f'{LEXICON_RU["choose_assembl"]} {category}:\n'
 
             if not assembl:
                 # Отправляем сообщение о том, что сборок в категории нет
@@ -339,7 +351,7 @@ async def process_pagination_callback(callback: CallbackQuery,
             )
 
             # Формируем сообщение с нумерацией сборок
-            message_text = f'Выберите сборку из категории {category}:\n'
+            message_text = f'{LEXICON_RU["choose_assembl"]} {category}:\n'
 
             # Обновляем состояние с текущей страницей
             await state.update_data(current_page=current_page)
@@ -366,8 +378,8 @@ async def send_photo_handler(callback: CallbackQuery,
                              pool: asyncpg.pool.Pool):
 
     """
-    Хендлер, срабатывающий на переход по ссылке из сообщения со сборками.
-    :param callback: Сообщение от пользователя.
+    Хендлер, срабатывающий на переход по сборке.
+    :param callback: CallbackQuery от пользователя с информацией о текущей сборке.
     :param bot: Объект Bot.
     :param state: Состояние пользователя для FSM.
     :param pool: Пул соединения с БД.
@@ -389,7 +401,7 @@ async def send_photo_handler(callback: CallbackQuery,
             # Получаем категорию из словаря data
             category = data.get('category')
 
-            # Отправляем запрос в FastAPI для извлечения file_id
+            # Получаем file_id из БД
             photo_id = await get_photo_file_id_by_description_from_db(
                 pool=pool,
                 description=caption
@@ -425,7 +437,10 @@ async def send_photo_handler(callback: CallbackQuery,
                 # Удаляем предыдущее сообщение
                 await callback.message.delete()
                 # Сохраняем file_id в FSM
-                await state.update_data(photo_id=photo_id)
+                await state.update_data(
+                    photo_id=photo_id,
+                    description=caption
+                )
                 # Отправляем фотографию с описанием и кнопками "Удалить" и "Изменить описание"
                 await callback.message.answer_photo(
                     photo=photo_id,
