@@ -1,7 +1,6 @@
 import json
 
 import asyncpg
-from typing import List, Dict
 
 from config.config import DATABASE_URL
 from config.log import logger
@@ -70,7 +69,7 @@ async def add_group_to_db(pool: asyncpg.pool.Pool,
         raise
 
 
-async def get_groups_from_db(pool: asyncpg.pool.Pool) -> List[int]:
+async def get_groups_from_db(pool: asyncpg.pool.Pool) -> list[int]:
 
     """
     Получение всех групп из БД.
@@ -143,18 +142,21 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
             async with conn.transaction():
                 # Добавление категории, если её нет, или получение её ID
                 category_id = await conn.fetchval(
-                    "INSERT INTO categories (category_name) " 
-                    "VALUES ($1) " 
-                    "ON CONFLICT (category_name) DO NOTHING " 
-                    "RETURNING id;",
+                    "SELECT id "
+                    "FROM categories "
+                    "WHERE category_name = $1;",
                     category_name
                 )
                 # Если категория уже была в БД, получаем её ID
                 if category_id is None:
                     category_id = await conn.fetchval(
-                        "SELECT id "
-                        "FROM categories "
-                        "WHERE category_name = $1;",
+                        "INSERT INTO categories (category_name, category_description) " 
+                        "VALUES ($1, $2) " 
+                        "ON CONFLICT (category_name) "
+                        "DO NOTHING "
+                        # "SET category_name = EXCLUDED.category_name " 
+                        "RETURNING id;",
+                        category_name,
                         category_name
                     )
                 # Добавляем фото или получаем его ID
