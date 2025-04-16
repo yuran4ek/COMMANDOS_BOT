@@ -94,7 +94,7 @@ async def search_photo_handler(message: Message,
                         # Отправляем пользователю все найденные фото с описанием, категорией и клавиатурой
                         await message.answer_photo(
                             photo=photo_id,
-                            caption=f'{LEXICON_RU["photo_found"]} {description}',
+                            caption=f'{LEXICON_RU["photo_found"]} <b>{description}</b>',
                             reply_markup=create_admins_keyboard(category=category)
                         )
                         await state.update_data(
@@ -106,7 +106,7 @@ async def search_photo_handler(message: Message,
                         # Отправляем пользователю все найденные фото с описанием и категорией
                         await message.answer_photo(
                             photo=photo_id,
-                            caption=f'{LEXICON_RU["photo_found"]} {description}',
+                            caption=f'{LEXICON_RU["photo_found"]} <b>{description}</b>',
                             reply_markup=None
                         )
                         # Очищаем состояние для дальнейшего его использования
@@ -148,7 +148,7 @@ async def search_photo_callback(callback: CallbackQuery,
 
             # Отправляем пользователю сообщение с инструкцией по поиску фото
             await callback.message.edit_text(
-                text=f'{LEXICON_RU["search_photo"]} {category}',
+                text=f'{LEXICON_RU["search_photo"]} <b>{category}</b>',
                 reply_markup=None
             )
             # Убираем "часики"
@@ -257,12 +257,12 @@ async def category_selection_callback(callback: CallbackQuery,
             )
 
             # Формируем сообщение с нумерацией сборок
-            message_text = f'{LEXICON_RU["choose_assembl"]} {category}:\n'
+            message_text = f'{LEXICON_RU["choose_assembl"]} <b>{category}</b>:\n'
 
             if not assembl:
                 # Отправляем сообщение о том, что сборок в категории нет
                 await callback.message.edit_text(
-                    text=LEXICON_RU['empty_category'],
+                    text=LEXICON_RU['empty_category']
                 )
             else:
                 # Если сообщение с фото
@@ -351,7 +351,7 @@ async def process_pagination_callback(callback: CallbackQuery,
             )
 
             # Формируем сообщение с нумерацией сборок
-            message_text = f'{LEXICON_RU["choose_assembl"]} {category}:\n'
+            message_text = f'{LEXICON_RU["choose_assembl"]} <b>{category}</b>:\n'
 
             # Обновляем состояние с текущей страницей
             await state.update_data(current_page=current_page)
@@ -412,7 +412,7 @@ async def send_photo_handler(callback: CallbackQuery,
                 return
 
             # Получаем описание из базы данных по file_id
-            description = LEXICON_RU['photo_found'] + caption
+            description = f'{LEXICON_RU["photo_found"]} <b>{caption}</b>'
 
             # Проверяем, является ли пользователь администратором в одной из групп
             is_admin = await check_is_admin(

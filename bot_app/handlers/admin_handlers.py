@@ -85,8 +85,8 @@ async def update_photo_handler(message: Message,
             # подтверждения от пользователя на замену фото в БД
             await message.answer_photo(
                 photo=new_photo_id,
-                caption=f'{LEXICON_RU["update_photo_in_db"]} {description} '
-                        f'{LEXICON_RU["add_photo_category_to_db"]} {category}\n'
+                caption=f'{LEXICON_RU["update_photo_in_db"]} <b>{description}</b> '
+                        f'{LEXICON_RU["add_photo_category_to_db"]} <b>{category}</b>\n'
                         f'{LEXICON_RU["confirm"]}',
                 reply_markup=create_admins_confirmation_keyboard(command='replace')
             )
@@ -137,26 +137,44 @@ async def check_message_for_photo(message: Message,
         caption_split = message.caption.split(maxsplit=1) if message.caption else []
         transliterated_text = await translit_filter(message)
 
-        # Проверяем длину сообщения, и, если больше одного слова и сообщение начинается с одной из категорий
-        for category in categories:
-            if len(caption_split) > 1 and caption_split[0] in category['name']:
-                # Получаем file_id
-                photo_id = message.photo[-1].file_id
-                # Сохраняем file_id в FSM
-                await state.update_data(
-                    photo_id=photo_id,
-                    category=caption_split[0],
-                    description=transliterated_text.get('description'),
-                    description_translit=transliterated_text.get('description_translit')
+        category_found = False
+
+        # Проверяем длину сообщения, и, если больше одного слова
+        if len(caption_split) > 1:
+            category = caption_split[0]
+            # Сообщение начинается с одной из категорий
+            for cat in categories:
+                if category == cat['name']:
+                    category_found = True
+                    break
+            # Получаем file_id
+            photo_id = message.photo[-1].file_id
+            # Сохраняем file_id в FSM
+            await state.update_data(
+                photo_id=photo_id,
+                category=caption_split[0],
+                description=transliterated_text.get('description'),
+                description_translit=transliterated_text.get('description_translit')
+            )
+
+            if category_found:
+                text_message = (
+                    f'{LEXICON_RU["add_photo_to_db"]} <b>{caption_split[1]}</b> '
+                    f'{LEXICON_RU["add_photo_category_to_db"]} <b>{category}</b>\n'
+                    f'{LEXICON_RU["confirm"]}'
                 )
-                # Отправляем сообщение пользователю с информацией об описании и категории для фото и ждём
-                # подтверждения от пользователя на добавление фото с описанием в БД
-                await message.answer(
-                    text=f'{LEXICON_RU["add_photo_to_db"]} {caption_split[1]} '
-                         f'{LEXICON_RU["add_photo_category_to_db"]} {caption_split[0]}\n'
-                         f'{LEXICON_RU["confirm"]}',
-                    reply_markup=create_admins_confirmation_keyboard(command='add')
+            else:
+                text_message = (
+                    f'{LEXICON_RU["category"]} <b>{category}</b> {LEXICON_RU["category_not_found"]}\n'
+                    f'{LEXICON_RU["confirm"]}'
                 )
+
+            # Отправляем сообщение пользователю с информацией об описании и категории для фото и ждём
+            # подтверждения от пользователя на добавление фото с описанием в БД
+            await message.answer(
+                text=text_message,
+                reply_markup=create_admins_confirmation_keyboard(command='add')
+            )
 
     except Exception as e:
         logger.error(f'Ошибка при получении фото на добавление в БД: {e}')
@@ -216,9 +234,6 @@ async def process_delete_photo_callback(callback: CallbackQuery,
             if not callback.message.caption:
                 raise Exception
 
-            # Получаем file_id для данного фото
-            photo_id = data.get('photo_id')
-
             # Редактируем описание под фотографией
             await callback.message.edit_caption(
                 caption=LEXICON_RU['update_photo'],
@@ -254,7 +269,7 @@ async def process_update_photo_description(callback: CallbackQuery,
         if not data.get('cancel_handler'):
 
             # Получаем file_id для данного фото
-            photo_id = callback.message.photo[-1].file_id
+            photo_id = data.get('photo_id')
 
             # Сохраняем file_id
             await state.update_data(photo_id=photo_id)
@@ -319,8 +334,8 @@ async def update_photo_description_handler(message: Message,
         # и ждём подтверждения для обновления описания для фотографии
         await message.answer_photo(
             photo=photo_id,
-            caption=f'{LEXICON_RU["new_photo_description"]}'
-                    f'{message.text}\n'
+            caption=f'{LEXICON_RU["new_photo_description"]}\n'
+                    f'<b>{message.text}</b>\n'
                     f'{LEXICON_RU["confirm"]}',
             reply_markup=create_admins_confirmation_keyboard(command='update')
         )
@@ -440,8 +455,8 @@ async def process_confirm_callback(callback: CallbackQuery,
                                 f'администратором {user_name}.')
                     # Обновляем описание для фотографии в сообщении
                     await callback.message.edit_caption(
-                        caption=f'{LEXICON_RU["new_photo_description"]}'
-                                f'{new_description}'
+                        caption=f'{LEXICON_RU["new_photo_description"]}\n'
+                                f'<b>{new_description}</b>'
                     )
                     # Очищаем состояние для дальнейшего его использования
                     await state.clear()
@@ -465,11 +480,15 @@ async def process_confirm_callback(callback: CallbackQuery,
             if callback.data == 'confirm_replace_yes':
                 try:
                     # Заменяем фото в БД
-                    await update_photo_in_db(pool=pool, photo_id=photo_id, new_photo_id=new_photo_id)
+                    await update_photo_in_db(
+                        pool=pool,
+                        photo_id=photo_id,
+                        new_photo_id=new_photo_id
+                    )
                     logger.info(f'photo_id у фото {description_from_db} успешно заменено на {new_photo_id} в БД '
                                 f'администратором {user_name}.')
                     # Обновляем описание для фотографии в сообщении
-                    await callback.message.edit_caption(caption=f'{LEXICON_RU["update_photo_successful"]}')
+                    await callback.message.edit_caption(caption=LEXICON_RU['update_photo_successful'])
                     # Очищаем состояние для дальнейшего его использования
                     await state.clear()
                 except Exception as e:
@@ -482,7 +501,7 @@ async def process_confirm_callback(callback: CallbackQuery,
                 # Возвращаем старое фото
                 await callback.message.answer_photo(
                     photo=photo_id,
-                    caption=f'{LEXICON_RU["update_photo_cancel"]}\n'
+                    caption=LEXICON_RU['update_photo_cancel']
                 )
                 # Очищаем состояние для дальнейшего его использования
                 await state.clear()
