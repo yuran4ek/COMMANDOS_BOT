@@ -16,6 +16,10 @@ from aiogram.filters import (
     JOIN_TRANSITION
 )
 
+from bot_app.exceptions.database import (
+    DatabaseAddGroupError,
+    DatabaseDeleteGroupError
+)
 from bot_app.keyboards.keyboards import create_link_button
 from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
 
@@ -91,6 +95,8 @@ async def on_chat_admin(event: ChatMemberUpdated,
                 text=LEXICON_RU['hello_group_join'],
                 reply_markup=create_link_button()
             )
+        except DatabaseAddGroupError as e:
+            logger.error(e)
         except Exception as e:
             logger.error(f'Ошибка при отправке приветственного сообщения в группу: {e}')
     except Exception as e:
@@ -152,5 +158,7 @@ async def on_chat_member_updated(event: ChatMemberUpdated,
                 group_id=group_id
             )
             logger.info(f'Группа {group_name} с ID {group_id} была удалена из БД.')
+    except DatabaseDeleteGroupError as e:
+        logger.error(e)
     except Exception as e:
         logger.error(f'Неожиданная ошибка при удалении бота из группы: {e}')

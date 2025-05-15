@@ -13,6 +13,14 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardMarkup
 
+from bot_app.exceptions.database import (
+    DatabaseGetGroupError,
+    DatabaseGetPhotosError,
+    DatabaseGetTotalPhotosError,
+    DatabaseGetFileIdByDescriptionError,
+    DatabaseSearchPhotoByDescriptionError,
+    DatabaseGetCategoriesError
+)
 from bot_app.keyboards.keyboards import (
     create_paginated_keyboard,
     create_categories_keyboard,
@@ -58,6 +66,7 @@ async def search_photo_handler(message: Message,
 
         # Получаем группы из БД
         groups_id = await get_groups_from_db(pool=pool)
+        logger.info(f'Успешное получение всех групп из БД.')
 
         # Получаем категорию из словаря data
         data = await state.get_data()
@@ -116,7 +125,12 @@ async def search_photo_handler(message: Message,
             # Уведомляем пользователя о том, что ничего не найдено
             await message.answer(text=LEXICON_RU['photo_not_found'])
             return
-
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+        await message.answer(LEXICON_RU['error'])
+    except DatabaseSearchPhotoByDescriptionError as e:
+        logger.error(e)
+        await message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке сообщения от пользователя при поиске фото: {e}')
         await message.answer(LEXICON_RU['error'])
@@ -144,6 +158,8 @@ async def search_photo_callback(callback: CallbackQuery,
             data = await state.get_data()
             category_data = data.get('category')
             categories = await get_categories_from_db(pool=pool)
+            logger.info(f'Успешное получение всех категорий из БД.')
+
             category = next((item['description'] for item in categories if item['name'] == category_data), None)
 
             # Отправляем пользователю сообщение с инструкцией по поиску фото
@@ -158,6 +174,9 @@ async def search_photo_callback(callback: CallbackQuery,
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке кнопки поиска: {e}')
         await callback.message.answer(LEXICON_RU['error'])
@@ -184,6 +203,7 @@ async def move_back_to_category_callback(callback: CallbackQuery,
             await state.update_data(cancel_handler=False)
             # Получаем категории из БД
             categories = await get_categories_from_db(pool=pool)
+            logger.info(f'Успешное получение всех категорий из БД.')
 
             keyboard = create_categories_keyboard(categories=categories)
 
@@ -195,6 +215,9 @@ async def move_back_to_category_callback(callback: CallbackQuery,
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке кнопки "Назад": {e}')
         await callback.message.answer(LEXICON_RU['error'])
@@ -237,12 +260,14 @@ async def category_selection_callback(callback: CallbackQuery,
                 limit=items_per_page,
                 offset=(current_page - 1) * items_per_page
             )
+            logger.info(f'Фото из категории {category} были успешно получены.')
 
             # Получаем общее количество доступных сборок по данной категории
             total_builds = await get_total_photos_count(
                 pool=pool,
                 category=category
             )
+            logger.info(f'Успешное получение количества фотографий из категории: {category}.')
 
             # Рассчитываем общее количество страниц
             total_pages = math.ceil(total_builds / items_per_page)
@@ -285,6 +310,12 @@ async def category_selection_callback(callback: CallbackQuery,
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetPhotosError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
+    except DatabaseGetTotalPhotosError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при получении сборок по категории: {e}')
         await callback.message.answer(text=LEXICON_RU['error'])
@@ -331,12 +362,14 @@ async def process_pagination_callback(callback: CallbackQuery,
                 limit=items_per_page,
                 offset=(current_page - 1) * items_per_page
             )
+            logger.info(f'Фото из категории {category} были успешно получены.')
 
             # Получаем общее количество доступных сборок по данной категории
             total_builds = await get_total_photos_count(
                 pool=pool,
                 category=category
             )
+            logger.info(f'Успешное получение количества фотографий из категории: {category}.')
 
             # Рассчитываем общее количество страниц
             total_pages = math.ceil(total_builds / items_per_page)
@@ -366,6 +399,12 @@ async def process_pagination_callback(callback: CallbackQuery,
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetPhotosError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
+    except DatabaseGetTotalPhotosError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при переходе на новую страницу: {e}')
         await callback.message.answer(text=LEXICON_RU['error'])
@@ -395,6 +434,7 @@ async def send_photo_handler(callback: CallbackQuery,
 
             # Получаем группы из БД
             groups_id = await get_groups_from_db(pool=pool)
+            logger.info(f'Успешное получение всех групп из БД.')
 
             caption = callback.data.replace("photo_", "")
 
@@ -406,6 +446,7 @@ async def send_photo_handler(callback: CallbackQuery,
                 pool=pool,
                 description=caption
             )
+            logger.info(f'Успешное получение file_id фото {photo_id} по описанию {caption}.')
 
             if not photo_id:
                 await callback.message.edit_text(text=LEXICON_RU['error'])
@@ -424,7 +465,7 @@ async def send_photo_handler(callback: CallbackQuery,
             # Если пользователь не администратор
             if not is_admin:
                 # Удаляем предыдущее сообщение
-                await callback.message.delete()
+                # await callback.message.delete()
                 # Отправляем фотографию с описанием
                 await callback.message.answer_photo(
                     photo=photo_id,
@@ -447,9 +488,17 @@ async def send_photo_handler(callback: CallbackQuery,
                     caption=description,
                     reply_markup=create_admins_keyboard(category=category)
                 )
+            # Убираем "часики" на кнопке
+            await callback.answer()
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
+    except DatabaseGetFileIdByDescriptionError as e:
+        logger.error(e)
+        await callback.message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке сообщения от пользователя с ссылкой на фото: {e}')
         await callback.message.edit_text(text=LEXICON_RU['error'])

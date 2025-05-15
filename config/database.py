@@ -5,6 +5,24 @@ import asyncpg
 from config.config import DATABASE_URL
 from config.log import logger
 
+from bot_app.exceptions.database import (
+    DatabaseConnectionError,
+    DatabaseAddGroupError,
+    DatabaseGetGroupError,
+    DatabaseDeleteGroupError,
+    DatabaseAddPhotoWithCategoryError,
+    DatabaseGetPhotosError,
+    DatabaseGetTotalPhotosError,
+    DatabaseGetPhotoDescriptionByFileIdError,
+    DatabaseGetFileIdByDescriptionError,
+    DatabaseGetCategoriesError,
+    DatabaseDeletePhotoError,
+    DatabaseUpdatePhotoError,
+    DatabaseUpdatePhotoDescriptionError,
+    DatabaseSearchPhotoByDescriptionError
+)
+from bot_app.exceptions.photo import PhotoAlreadyExistsError
+
 
 async def create_pool() -> asyncpg.pool.Pool:
 
@@ -17,8 +35,7 @@ async def create_pool() -> asyncpg.pool.Pool:
         # Возвращаем объект пула подключения к БД
         return await asyncpg.create_pool(dsn=DATABASE_URL)
     except Exception as e:
-        logger.error(f'Ошибка при создании пула подключений к БД: {e}')
-        raise
+        raise DatabaseConnectionError.from_exception(e) from e
 
 
 async def close_pool(pool: asyncpg.pool.Pool) -> None:
@@ -32,10 +49,8 @@ async def close_pool(pool: asyncpg.pool.Pool) -> None:
     try:
         # Закрываем пул соединения с БД
         await pool.close()
-        logger.info('Успешное закрытие пула соединения с БД.')
     except Exception as e:
-        logger.error(f'Ошибка при закрытии пула подключений: {e}')
-        raise
+        raise DatabaseConnectionError.from_exception(e) from e
 
 
 async def add_group_to_db(pool: asyncpg.pool.Pool,
@@ -61,12 +76,14 @@ async def add_group_to_db(pool: asyncpg.pool.Pool,
                 group_id,
                 group_name
             )
-            logger.info(f'Группа {group_name} с ID {group_id} была успешно добавлена в БД.')
-    except asyncpg.exceptions.UniqueViolationError:
-        logger.error(f'Группа {group_name} с ID {group_id} уже существует в базе данных.')
+    except asyncpg.PostgresError as e:
+        raise DatabaseAddGroupError(
+            f'{type(e).__name__}: {e} | group_name: {group_name}, group_id: {group_id}'
+        ) from e
     except Exception as e:
-        logger.error(f'Ошибка при добавлении группы в базу данных: {e}')
-        raise
+        raise DatabaseAddGroupError(
+            f'{type(e).__name__}: {e} | group_name: {group_name}, group_id: {group_id}'
+        ) from e
 
 
 async def get_groups_from_db(pool: asyncpg.pool.Pool) -> list[int]:
@@ -84,14 +101,11 @@ async def get_groups_from_db(pool: asyncpg.pool.Pool) -> list[int]:
                 "SELECT ARRAY_AGG(group_id) "
                 "FROM groups"
             )
-            logger.info(f'Группы были успешно получены из БД: {groups_id}')
             return groups_id if groups_id else []
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка взаимодействия с базой данных при получении групп: {e}')
-        raise
+        raise DatabaseGetGroupError.from_exception(e) from e
     except Exception as e:
-        logger.error(f'Ошибка при получении групп: {e}')
-        raise
+        raise DatabaseGetGroupError(f'Непредвиденная ошибка: {type(e).__name__}: {e}') from e
 
 
 async def delete_group_from_db(pool: asyncpg.pool.Pool,
@@ -112,12 +126,10 @@ async def delete_group_from_db(pool: asyncpg.pool.Pool,
                 "WHERE group_id = $1",
                 group_id
             )
-        logger.info(f'Группа {group_id} успешно удалена из БД')
-    except asyncpg.exceptions.ForeignKeyViolationError:
-        logger.error(f'Невозможно удалить группу с ID {group_id}, так как она связана с другими данными')
+    except asyncpg.exceptions.ForeignKeyViolationError as e:
+        raise DatabaseDeleteGroupError(f'{type(e).__name__}: {e} | group_id: {group_id}') from e
     except Exception as e:
-        logger.error(f'Ошибка при удалении группы из БД: {e}')
-        raise
+        raise DatabaseDeleteGroupError(f'{type(e).__name__}: {e} | group_id: {group_id}') from e
 
 
 async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
@@ -140,32 +152,50 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
         # Добавление фото с категорией в БД
         async with pool.acquire() as conn:
             async with conn.transaction():
-                # Добавление категории, если её нет, или получение её ID
+                # Проверяем, есть ли фото с таким описанием в БД
+                existing = await conn.fetchval(
+                    "SELECT 1 "
+                    "FROM photos "
+                    "WHERE description = $1;",
+                    description
+                )
+                if existing:
+                    raise PhotoAlreadyExistsError(f'description: {description}')
+
+                # Если категория уже была в БД, получаем её ID
                 category_id = await conn.fetchval(
                     "SELECT id "
                     "FROM categories "
                     "WHERE category_name = $1;",
                     category_name
                 )
-                # Если категория уже была в БД, получаем её ID
+                # Добавление категории, если её нет
                 if category_id is None:
                     category_id = await conn.fetchval(
                         "INSERT INTO categories (category_name, category_description) " 
                         "VALUES ($1, $2) " 
                         "ON CONFLICT (category_name) "
                         "DO NOTHING "
-                        # "SET category_name = EXCLUDED.category_name " 
                         "RETURNING id;",
                         category_name,
                         category_name
                     )
-                # Добавляем фото или получаем его ID
+                    # Если всё ещё None — получаем ID вручную
+                    if category_id is None:
+                        category_id = await conn.fetchval(
+                            "SELECT id "
+                            "FROM categories "
+                            "WHERE category_name = $1;",
+                            category_name
+                        )
+                # Добавляем фото
                 await conn.execute(
                     "INSERT INTO photos (photo_id, description, description_translit, category_id) "
                     "VALUES ($1, $2, $3, $4) "
                     "ON CONFLICT (photo_id) "
                     "DO UPDATE "
-                    "SET description = EXCLUDED.description, "
+                    "SET "
+                    "description = EXCLUDED.description, "
                     "description_translit = EXCLUDED.description_translit, "
                     "category_id = EXCLUDED.category_id ",
                     photo_id,
@@ -174,12 +204,14 @@ async def add_photo_with_category_to_db(pool: asyncpg.pool.Pool,
                     category_id
                 )
 
-        logger.info(f'Фото "{description}" успешно добавлено в категорию "{category_name}"')
-
+    except PhotoAlreadyExistsError:
+        raise
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при добавлении фото в БД: {e}')
+        raise DatabaseAddPhotoWithCategoryError.from_exception(e) from e
     except Exception as e:
-        logger.error(f'Произошла непредвиденная ошибка: {e}')
+        raise DatabaseAddPhotoWithCategoryError(
+            f'{type(e).__name__}: {e} | description: {description}; category: {category_name}'
+        ) from e
 
 
 async def get_photos_from_db(pool: asyncpg.pool.Pool,
@@ -226,14 +258,11 @@ async def get_photos_from_db(pool: asyncpg.pool.Pool,
             )
 
             photos = [dict(row) for row in rows]
-            logger.info(f'Успешное получение фотографий: {photos}')
             return photos
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка взаимодействия с базой данных при получении фотографий: {e}')
-        raise
+        raise DatabaseGetPhotosError.from_exception(e) from e
     except Exception as e:
-        logger.error(f'Ошибка при получении фотографий: {e}')
-        raise
+        raise DatabaseGetPhotosError.from_exception(e) from e
 
 
 async def get_total_photos_count(pool: asyncpg.pool.Pool,
@@ -265,14 +294,11 @@ async def get_total_photos_count(pool: asyncpg.pool.Pool,
                 "WHERE category_id = $1",
                 category_id
             )
-            logger.info(f'Успешное получение общего количества фотографий по категории {category}')
             return result
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при получении количества фотографий: {e}')
-        raise
+        raise DatabaseGetTotalPhotosError.from_exception(e) from e
     except Exception as e:
-        logger.error(f'Ошибка при получении количества фотографий: {e}')
-        raise
+        raise DatabaseGetTotalPhotosError(f'{type(e).__name__}: {e} | category: {category}') from e
 
 
 async def get_photo_description_by_file_id_from_db(pool: asyncpg.pool.Pool,
@@ -295,14 +321,18 @@ async def get_photo_description_by_file_id_from_db(pool: asyncpg.pool.Pool,
             )
             if row:
                 description = row['description']
-                logger.info(f'Успешное получение описания: "{description}" по file_id={file_id}')
                 return description
             else:
                 logger.warning(f'Описание не найдено по file_id={file_id}')
                 return 'Описания нет, пожалуйста, обратитесь к администратору.'
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при получении описания к фото по file_id={file_id}: {e}')
-        raise
+        raise DatabaseGetPhotoDescriptionByFileIdError(
+            f'{type(e).__name__}: {e} | file_id: {file_id}'
+        ) from e
+    except Exception as e:
+        raise DatabaseGetPhotoDescriptionByFileIdError(
+            f'{type(e).__name__}: {e} | file_id: {file_id}'
+        ) from e
 
 
 async def get_photo_file_id_by_description_from_db(pool: asyncpg.pool.Pool,
@@ -325,13 +355,13 @@ async def get_photo_file_id_by_description_from_db(pool: asyncpg.pool.Pool,
             )
             if row:
                 file_id = row['photo_id']
-                logger.info(f'Успешное получение file_id: "{file_id}"')
                 return file_id
             else:
                 return 'file_id нет, пожалуйста, обратитесь к администратору.'
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при получении file_id к фото: {e}')
-        raise
+        raise DatabaseGetFileIdByDescriptionError.from_exception(e) from e
+    except Exception as e:
+        raise DatabaseGetFileIdByDescriptionError(f'{type(e).__name__}: {e} | file_id: {file_id}') from e
 
 
 async def get_categories_from_db(pool: asyncpg.pool.Pool) -> list[dict]:
@@ -351,14 +381,11 @@ async def get_categories_from_db(pool: asyncpg.pool.Pool) -> list[dict]:
                 "FROM categories",
             )
             categories = json.loads(categories_json) if categories_json else []
-            logger.info(f'Категории были успешно получены из БД: {categories}')
             return categories
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка взаимодействия с базой данных при получении категорий: {e}')
-        raise
+        raise DatabaseGetCategoriesError.from_exception(e) from e
     except Exception as e:
-        logger.error(f'Ошибка при получении категорий: {e}')
-        raise
+        raise DatabaseGetCategoriesError(f'Неизвестная ошибка: {e}') from e
 
 
 async def delete_photo_from_db(pool: asyncpg.pool.Pool,
@@ -381,11 +408,10 @@ async def delete_photo_from_db(pool: asyncpg.pool.Pool,
             # Если фото не найдено
             if result == "DELETE 0":
                 logger.warning(f'Фото с ID {photo_id} не найдено для удаления.')
-    except asyncpg.exceptions.ForeignKeyViolationError:
-        logger.error(f'Невозможно удалить фото с ID: {photo_id}, так как оно связано с другими данными')
+    except asyncpg.exceptions.ForeignKeyViolationError as e:
+        raise DatabaseDeletePhotoError(f'{type(e).__name__}: {e} | file_id: {photo_id}') from e
     except Exception as e:
-        logger.error(f'Ошибка при удалении фото из БД: {e}')
-        raise
+        raise DatabaseDeletePhotoError(f'{type(e).__name__}: {e} | file_id: {photo_id}') from e
 
 
 async def update_photo_in_db(pool: asyncpg.pool.Pool,
@@ -412,13 +438,13 @@ async def update_photo_in_db(pool: asyncpg.pool.Pool,
             # Если фото не найдено
             if result == 'UPDATE 0':
                 logger.warning(f'Фото с ID {photo_id} не найдено в БД.')
-            else:
-                logger.info(f'Фото с ID {photo_id} успешно обновлено. Новое photo_id: {new_photo_id}.')
+
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при обновлении фото с ID {photo_id}: {e}')
-        raise
+        raise DatabaseUpdatePhotoError(f'{type(e).__name__}: {e} | file_id: {photo_id}') from e
     except Exception as e:
-        logger.error(f'Ошибка при обновлении фото: {e}')
+        raise DatabaseUpdatePhotoError(
+            f'{type(e).__name__}: {e} | file_id: {photo_id}, new_file_id: {new_photo_id}'
+        ) from e
 
 
 async def update_photo_description(pool: asyncpg.pool.Pool,
@@ -449,13 +475,12 @@ async def update_photo_description(pool: asyncpg.pool.Pool,
             # Если фото не найдено
             if result == 'UPDATE 0':
                 logger.warning(f'Фото с ID {photo_id} не найдено в БД.')
-            else:
-                logger.info(f'Фото с ID {photo_id} успешно обновлено. Новое описание: {new_description}.')
     except asyncpg.PostgresError as e:
-        logger.error(f'Ошибка при обновлении описания фото с ID {photo_id}: {e}')
-        raise
+        raise DatabaseUpdatePhotoDescriptionError(f'{type(e).__name__}: {e} | file_id: {photo_id}') from e
     except Exception as e:
-        logger.error(f'Ошибка при обновлении фото: {e}')
+        raise DatabaseUpdatePhotoDescriptionError(
+            f'{type(e).__name__}: {e} | file_id: {photo_id}, new_description: {new_description}'
+        ) from e
 
 
 async def search_photo_by_description_in_db(pool: asyncpg.pool.Pool,
@@ -484,6 +509,8 @@ async def search_photo_by_description_in_db(pool: asyncpg.pool.Pool,
                 category
             )
         return [dict(row) for row in rows]
+    except asyncpg.PostgresError as e:
+        raise DatabaseSearchPhotoByDescriptionError.from_exception(e) from e
     except Exception as e:
         logger.error(f'Ошибка при поиске фото: {e}')
         return []

@@ -8,11 +8,15 @@ from aiogram import (
 from aiogram import filters
 from aiogram.fsm.context import FSMContext
 
+from bot_app.exceptions.database import (
+    DatabaseGetCategoriesError,
+    DatabaseGetGroupError
+)
+from bot_app.filters.check_chat_type import ChatTypeFilter
 from bot_app.keyboards.keyboards import (
     create_categories_keyboard,
     create_link_chanel_button
 )
-
 from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
 from bot_app.utils.admin_check import check_is_admin
 
@@ -27,7 +31,8 @@ from config.log import logger
 bot_commands_router = Router(name='bot_commands_router')
 
 
-@bot_commands_router.message(filters.Command('cancel'))
+@bot_commands_router.message(ChatTypeFilter('private'),
+                             filters.Command('cancel'))
 async def cancel_handler(message: types.Message,
                          state: FSMContext):
 
@@ -50,7 +55,8 @@ async def cancel_handler(message: types.Message,
         await message.answer(LEXICON_RU['error'])
 
 
-@bot_commands_router.message(filters.Command('start'))
+@bot_commands_router.message(ChatTypeFilter('private'),
+                             filters.Command('start'))
 async def start_command(message: types.Message,
                         bot: Bot,
                         pool: asyncpg.pool.Pool):
@@ -69,9 +75,12 @@ async def start_command(message: types.Message,
 
         # Получаем группы из БД
         groups_id = await get_groups_from_db(pool=pool)
+        logger.info(f'Успешное получение всех групп из БД.')
 
         # Получаем категории из БД
         categories = await get_categories_from_db(pool=pool)
+        logger.info(f'Успешное получение всех категорий из БД.')
+
         category_name = ''
         for name in categories:
             category_name += f'{name.get("name")}\n'
@@ -97,6 +106,10 @@ async def start_command(message: types.Message,
         else:
             await message.answer(text=text)
 
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
     except KeyError as e:
         logger.error(f'Ключ {e} отсутствует в LEXICON_RU')
         await message.answer(LEXICON_RU['error_key'])
@@ -105,7 +118,8 @@ async def start_command(message: types.Message,
         await message.answer(LEXICON_RU['error'])
 
 
-@bot_commands_router.message(filters.Command('assembl'))
+@bot_commands_router.message(ChatTypeFilter('private'),
+                             filters.Command('assembl'))
 async def assembles_command(message: types.Message,
                             state: FSMContext,
                             pool: asyncpg.pool.Pool):
@@ -131,19 +145,23 @@ async def assembles_command(message: types.Message,
             text=LEXICON_RU['assembl'],
             reply_markup=keyboard
             )
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
+        await message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка в обработке команды /assembl: {e}')
         await message.answer(LEXICON_RU['error'])
 
 
-@bot_commands_router.message(filters.Command('help'))
-async def assembles_command(message: types.Message,
-                            bot: Bot,
-                            pool: asyncpg.pool.Pool
-                            ):
+@bot_commands_router.message(ChatTypeFilter('private'),
+                             filters.Command('help'))
+async def help_command(message: types.Message,
+                       bot: Bot,
+                       pool: asyncpg.pool.Pool
+                       ):
 
     """
-    Хендлер, срабатывающий на команду /сборки.
+    Хендлер, срабатывающий на команду /help.
     :param message: Сообщение от пользователя с командой сборки.
     :param bot: Объект Bot.
     :param pool: Пул соединения с БД.
@@ -156,9 +174,11 @@ async def assembles_command(message: types.Message,
 
         # Получаем группы из БД
         groups_id = await get_groups_from_db(pool=pool)
+        logger.info(f'Успешное получение всех групп из БД.')
 
         # Получаем категории из БД
         categories = await get_categories_from_db(pool=pool)
+        logger.info(f'Успешное получение всех категорий из БД.')
 
         category_name = ''
         for name in categories:
@@ -181,12 +201,19 @@ async def assembles_command(message: types.Message,
         # Отправляем пользователю сообщение с помощью
         await message.answer(text=text)
 
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+        await message.answer(LEXICON_RU['error'])
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
+        await message.answer(LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка в обработке команды /help: {e}')
         await message.answer(LEXICON_RU['error'])
 
 
-@bot_commands_router.message(filters.Command('commandos'))
+@bot_commands_router.message(ChatTypeFilter('private'),
+                             filters.Command('commandos'))
 async def cancel_handler(message: types.Message):
 
     """

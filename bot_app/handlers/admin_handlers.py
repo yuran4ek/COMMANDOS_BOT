@@ -10,6 +10,15 @@ from aiogram.types import (
 )
 from aiogram.fsm.context import FSMContext
 
+from bot_app.exceptions.database import (
+    DatabaseGetGroupError,
+    DatabaseGetCategoriesError,
+    DatabaseAddPhotoWithCategoryError,
+    DatabaseDeletePhotoError,
+    DatabaseUpdatePhotoDescriptionError,
+    DatabaseUpdatePhotoError,
+    DatabaseGetPhotoDescriptionByFileIdError,
+)
 from bot_app.filters.transliterate_filter import TransliterationFilter
 from bot_app.keyboards.keyboards import create_admins_confirmation_keyboard
 from bot_app.lexicon.lexicon_common.lexicon_ru import LEXICON_RU
@@ -18,6 +27,7 @@ from bot_app.states.admin_states import AdminUpdateDescriptionState
 from bot_app.utils.admin_check import check_is_admin
 
 from config.database import (
+    PhotoAlreadyExistsError,
     get_groups_from_db,
     get_categories_from_db,
     add_photo_with_category_to_db,
@@ -55,7 +65,7 @@ async def update_photo_handler(message: Message,
         if not data.get('cancel_handler'):
             # Получаем группы из БД
             groups_id = await get_groups_from_db(pool=pool)
-
+            logger.info('Успешное получение всех групп из БД.')
             # Получаем ID пользователя
             user_id = message.from_user.id
             # Проверяем, является ли пользователь администратором в одной из групп
@@ -78,6 +88,7 @@ async def update_photo_handler(message: Message,
                 pool=pool,
                 file_id=photo_id
             )
+            logger.info(f'Успешное получение описания фото {description} по file_id {photo_id}.')
 
             # Сохраняем новый file_id в FSM
             await state.update_data(new_photo_id=new_photo_id)
@@ -90,7 +101,12 @@ async def update_photo_handler(message: Message,
                         f'{LEXICON_RU["confirm"]}',
                 reply_markup=create_admins_confirmation_keyboard(command='replace')
             )
-
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+        await message.answer(text=LEXICON_RU['error'])
+    except DatabaseGetPhotoDescriptionByFileIdError as e:
+        logger.error(e)
+        await message.answer(text=LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при получении фото на замену его в БД: {e}')
         await message.answer(text=LEXICON_RU['error'])
@@ -103,7 +119,7 @@ async def check_message_for_photo(message: Message,
                                   state: FSMContext):
 
     """
-    Хендлер, срабатывающий лишь на фотографию (в группах или ЛС администраторов групп)
+    Хендлер, срабатывающий лишь на фотографию (в ЛС администраторов групп)
     и описанием, которое начинается как одна из категорий.
     :param message: Сообщение от пользователя.
     :param bot: Объект Bot.
@@ -120,7 +136,9 @@ async def check_message_for_photo(message: Message,
         translit_filter = TransliterationFilter(mode='add')
         # Получаем категории, группы из БД
         categories = await get_categories_from_db(pool=pool)
+        logger.info('Успешное получение всех категорий из БД.')
         groups_id = await get_groups_from_db(pool=pool)
+        logger.info('Успешное получение всех групп из БД.')
 
         # Получаем ID пользователя
         user_id = message.from_user.id
@@ -131,6 +149,9 @@ async def check_message_for_photo(message: Message,
                 groups_id=groups_id
         ):
             await message.answer(text=LEXICON_RU['user_not_admin'])
+            return
+
+        if not message.chat.type == 'private':
             return
 
         # Разбиваем строку входящего сообщения на подстроки, если сообщение не пустое
@@ -175,7 +196,12 @@ async def check_message_for_photo(message: Message,
                 text=text_message,
                 reply_markup=create_admins_confirmation_keyboard(command='add')
             )
-
+    except DatabaseGetCategoriesError as e:
+        logger.error(e)
+        await message.answer(text=LEXICON_RU['error'])
+    except DatabaseGetGroupError as e:
+        logger.error(e)
+        await message.answer(text=LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при получении фото на добавление в БД: {e}')
         await message.answer(text=LEXICON_RU['error'])
@@ -186,7 +212,7 @@ async def process_delete_photo_callback(callback: CallbackQuery,
                                         state: FSMContext):
 
     """
-    Хендлер, срабатывающий на команду с кнопки "Удалить сборку".
+    Хендлер, срабатывающий на команду с кнопки "Удалить".
     :param callback: CallbackQuery от пользователя с параметром для удаления.
     :param state: Состояние пользователя для FSM.
     :return: Функция ничего не возвращает.
@@ -198,7 +224,7 @@ async def process_delete_photo_callback(callback: CallbackQuery,
         if not data.get('cancel_handler'):
             # Если нет описания к фото
             if not callback.message.caption:
-                raise Exception
+                raise Exception('Отсутствует описание к фото')
 
             # Редактируем описание для фотографии
             await callback.message.edit_caption(
@@ -212,15 +238,15 @@ async def process_delete_photo_callback(callback: CallbackQuery,
             return
     except Exception as e:
         logger.error(f'Ошибка при обработке запроса на удаление фото: {e}')
-        await callback.answer(text=LEXICON_RU['error'])
+        await callback.message.answer(text=LEXICON_RU['error'])
 
 
 @bot_admins_handlers_router.callback_query(F.data == 'update_photo')
-async def process_delete_photo_callback(callback: CallbackQuery,
+async def process_update_photo_callback(callback: CallbackQuery,
                                         state: FSMContext):
 
     """
-    Хендлер, срабатывающий на команду с кнопки "Заменить сборку".
+    Хендлер, срабатывающий на команду с кнопки "Заменить".
     :param callback: CallbackQuery от пользователя с параметром для удаления.
     :param state: Состояние пользователя для FSM.
     :return: Функция ничего не возвращает.
@@ -232,7 +258,7 @@ async def process_delete_photo_callback(callback: CallbackQuery,
         if not data.get('cancel_handler'):
             # Если нет описания к фото
             if not callback.message.caption:
-                raise Exception
+                raise Exception('Отсутствует описание к фото')
 
             # Редактируем описание под фотографией
             await callback.message.edit_caption(
@@ -246,8 +272,8 @@ async def process_delete_photo_callback(callback: CallbackQuery,
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
     except Exception as e:
-        logger.error(f'Ошибка при обработке нажатия кнопки "Заменить сборку": {e}')
-        await callback.answer(text=LEXICON_RU['error'])
+        logger.error(f'Ошибка при обработке запроса на замену фото: {e}')
+        await callback.message.answer(text=LEXICON_RU['error'])
 
 
 @bot_admins_handlers_router.callback_query(F.data == 'update_description')
@@ -256,7 +282,7 @@ async def process_update_photo_description(callback: CallbackQuery,
                                            pool: asyncpg.pool.Pool):
 
     """
-    Хендлер, срабатывающий на команду с кнопки "Изменить описание".
+    Хендлер, срабатывающий на команду с кнопки "Изменить".
     :param callback: CallbackQuery от пользователя с параметрами для изменений описания.
     :param state: Состояние пользователя для FSM.
     :param pool: Пул соединения с БД.
@@ -271,18 +297,16 @@ async def process_update_photo_description(callback: CallbackQuery,
             # Получаем file_id для данного фото
             photo_id = data.get('photo_id')
 
-            # Сохраняем file_id
-            await state.update_data(photo_id=photo_id)
-
             # Если нет описания к фото
             if not callback.message.caption:
-                raise Exception
+                raise Exception('Отсутствует описание к фото')
 
             # Получаем описание к сборке из БД
             description = await get_photo_description_by_file_id_from_db(
                 pool=pool,
                 file_id=photo_id
             )
+            logger.info(f'Успешное получение описания фото {description} по file_id {photo_id}.')
 
             # редактируем описание для фотографии
             await callback.message.edit_caption(
@@ -297,9 +321,12 @@ async def process_update_photo_description(callback: CallbackQuery,
         else:
             await callback.answer(text=LEXICON_RU['buttons_not_active'])
             return
+    except DatabaseGetPhotoDescriptionByFileIdError as e:
+        logger.error(e)
+        await callback.message.answer(text=LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке нажатия кнопки "Редактировать описание": {e}')
-        await callback.answer(text=LEXICON_RU['error'])
+        await callback.message.answer(text=LEXICON_RU['error'])
 
 
 @bot_admins_handlers_router.message(AdminUpdateDescriptionState.update_description)
@@ -321,7 +348,7 @@ async def update_photo_description_handler(message: Message,
         # Получаем словарь data из FSM
         data = await state.get_data()
         if not data:
-            raise Exception
+            raise Exception('Словарь data в FSM пуст')
 
         # Получаем file_id фотографии
         photo_id = data.get('photo_id')
@@ -360,152 +387,167 @@ async def process_confirm_callback(callback: CallbackQuery,
     :return: Функция ничего не возвращает.
     """
 
-    # Проверяем, не вызвана ли команда /cancel
-    data = await state.get_data()
-    if not data.get('cancel_handler'):
-        # Получаем данные, какая команда (добавить, удалить, изменить) сейчас используется пользователем
-        command = callback.data.split('_')[1]
+    try:
+        # Проверяем, не вызвана ли команда /cancel
+        data = await state.get_data()
+        if not data.get('cancel_handler'):
+            # Получаем данные, какая команда (добавить, удалить, изменить) сейчас используется пользователем
+            command = callback.data.split('_')[1]
 
-        # Получаем Username пользователя
-        user_name = callback.from_user.username
-        # Получаем данные о file_id фотографии
-        photo_id = data.get('photo_id')
-        description_from_db = await get_photo_description_by_file_id_from_db(
-            pool=pool,
-            file_id=photo_id
-        )
+            # Получаем Username пользователя
+            user_name = callback.from_user.username
+            # Получаем данные о file_id фотографии
+            photo_id = data.get('photo_id')
+            description_from_db = await get_photo_description_by_file_id_from_db(
+                    pool=pool,
+                    file_id=photo_id
+                )
+            logger.info(f'Успешное получение описания фото {description_from_db} по file_id {photo_id}.')
 
-        # Обработка команды на добавление фото с описанием в БД
-        if command == 'add':
-            category = data.get('category')
-            description = data.get('description')
-            description_translit = data.get('description_translit')
+            # Обработка команды на добавление фото с описанием в БД
+            if command == 'add':
+                category = data.get('category')
+                description = data.get('description')
+                description_translit = data.get('description_translit')
 
-            # Обработка нажатия кнопки "Да"
-            if callback.data == 'confirm_add_yes':
-                try:
-                    # Добавляем фото с описанием в БД
-                    await add_photo_with_category_to_db(
-                        pool=pool,
-                        photo_id=photo_id,
-                        description=description,
-                        description_translit=description_translit,
-                        category_name=category
-                    )
-                    # Уведомляем пользователя об успешном выполнении операции
-                    await callback.message.edit_text(text=LEXICON_RU['add_photo_confirm'])
+                # Обработка нажатия кнопки "Да"
+                if callback.data == 'confirm_add_yes':
+                    try:
+                        # Добавляем фото с описанием в БД
+                        await add_photo_with_category_to_db(
+                            pool=pool,
+                            photo_id=photo_id,
+                            description=description,
+                            description_translit=description_translit,
+                            category_name=category
+                        )
+                        logger.info(f'Фото "{description}" успешно добавлено в категорию "{category}"')
+                        # Уведомляем пользователя об успешном выполнении операции
+                        await callback.message.edit_text(text=LEXICON_RU['add_photo_confirm'])
+                        # Очищаем состояние для дальнейшего его использования
+                        await state.clear()
+                    except PhotoAlreadyExistsError as e:
+                        await callback.message.answer(
+                            f'⚠️ {str(e)}\n\n'
+                            f'{LEXICON_RU["photo_already_exists_error"]}'
+                        )
+                    except DatabaseAddPhotoWithCategoryError as e:
+                        logger.error(e)
+                        await callback.message.edit_text(text=LEXICON_RU['error'])
+                # Обработка нажатия кнопки "Нет"
+                elif callback.data == 'confirm_add_no':
+                    # Уведомляем пользователя об отмене операции
+                    await callback.message.edit_text(text=LEXICON_RU['cancel'])
                     # Очищаем состояние для дальнейшего его использования
                     await state.clear()
-                except Exception as e:
-                    logger.error(f'Ошибка при обработке запроса на добавление фото в БД: {e}')
-                    await callback.message.edit_text(text=LEXICON_RU['error'])
-            # Обработка нажатия кнопки "Нет"
-            elif callback.data == 'confirm_add_no':
-                # Уведомляем пользователя об отмене операции
-                await callback.message.edit_text(text=LEXICON_RU['cancel'])
-                # Очищаем состояние для дальнейшего его использования
-                await state.clear()
 
-        # Обработка команды на удаление фото из БД
-        elif command == 'delete':
-            # Обработка нажатия кнопки "да"
-            if callback.data == 'confirm_delete_yes':
-                try:
-                    # Удаляем фото из БД
-                    await delete_photo_from_db(
-                        pool=pool,
-                        photo_id=photo_id
+            # Обработка команды на удаление фото из БД
+            elif command == 'delete':
+                # Обработка нажатия кнопки "да"
+                if callback.data == 'confirm_delete_yes':
+                    try:
+                        # Удаляем фото из БД
+                        await delete_photo_from_db(
+                            pool=pool,
+                            photo_id=photo_id
+                        )
+
+                        # Удаляем фото из сообщения
+                        await callback.message.delete()
+                        logger.info(f'Фото {description_from_db} успешно удалено из БД администратором {user_name}.')
+                        # Уведомляем пользователя об успешном удалении
+                        await callback.message.answer(text=LEXICON_RU['delete_photo_successful'])
+                        # Очищаем состояние для дальнейшего его использования
+                        await state.clear()
+                    except DatabaseDeletePhotoError as e:
+                        logger.error(e)
+                        await callback.message.answer(text=LEXICON_RU['error'])
+                # Обработка нажатия кнопки "Нет"
+                elif callback.data == 'confirm_delete_no':
+                    # Возвращаем описание для фото
+                    await callback.message.edit_caption(
+                        caption=f'{LEXICON_RU["photo_found"]} {description_from_db}'
                     )
+                    # Очищаем состояние для дальнейшего его использования
+                    await state.clear()
 
+            # Обработка команды на редактирование описания к фото
+            elif command == 'update':
+                # Получаем новое описание и категорию для фото
+                new_description = data.get('new_description')
+                new_description_translit = data.get('new_description_translit')
+                # Обработка нажатия кнопки "Да"
+                if callback.data == 'confirm_update_yes':
+                    try:
+                        # Обновляем описание для фото в БД
+                        await update_photo_description(
+                            pool=pool,
+                            photo_id=photo_id,
+                            new_description=new_description,
+                            new_description_translit=new_description_translit
+                        )
+                        logger.info(f'Описание для фото {description_from_db} успешно обновлено '
+                                    f'на {new_description} в БД '
+                                    f'администратором {user_name}.')
+                        # Обновляем описание для фотографии в сообщении
+                        await callback.message.edit_caption(
+                            caption=f'{LEXICON_RU["new_photo_description"]}\n'
+                                    f'<b>{new_description}</b>'
+                        )
+                        # Очищаем состояние для дальнейшего его использования
+                        await state.clear()
+                    except DatabaseUpdatePhotoDescriptionError as e:
+                        logger.error(e)
+                        await callback.message.answer(text=LEXICON_RU['error'])
+                # Обработка нажатия кнопки "Нет"
+                elif callback.data == 'confirm_update_no':
+                    # Возвращаем старое описание для фото
+                    await callback.message.edit_caption(
+                        caption=description_from_db
+                    )
+                    # Очищаем состояние для дальнейшего его использования
+                    await state.clear()
+
+            # Обработка команды на замену фото
+            elif command == 'replace':
+                # Получаем новый photo_id, категорию и описание для фото
+                new_photo_id = data.get('new_photo_id')
+                # Обработка нажатия кнопки "Да"
+                if callback.data == 'confirm_replace_yes':
+                    try:
+                        # Заменяем фото в БД
+                        await update_photo_in_db(
+                            pool=pool,
+                            photo_id=photo_id,
+                            new_photo_id=new_photo_id
+                        )
+                        logger.info(f'photo_id у фото {description_from_db} успешно заменено на {new_photo_id} в БД '
+                                    f'администратором {user_name}.')
+                        # Обновляем описание для фотографии в сообщении
+                        await callback.message.edit_caption(caption=LEXICON_RU['update_photo_successful'])
+                        # Очищаем состояние для дальнейшего его использования
+                        await state.clear()
+                    except DatabaseUpdatePhotoError as e:
+                        logger.error(e)
+                        await callback.message.answer(text=LEXICON_RU['error'])
+                # Обработка нажатия кнопки "Нет"
+                elif callback.data == 'confirm_replace_no':
                     # Удаляем фото из сообщения
                     await callback.message.delete()
-                    logger.info(f'Фото {description_from_db} успешно удалено из БД администратором {user_name}.')
-                    # Уведомляем пользователя об успешном удалении
-                    await callback.message.answer(text=LEXICON_RU['delete_photo_successful'])
-                    # Очищаем состояние для дальнейшего его использования
-                    await state.clear()
-                except Exception as e:
-                    logger.error(f'Ошибка при обработке запроса на подтверждение удаления фото из БД: {e}')
-                    await callback.message.manswer(text=LEXICON_RU['error'])
-            # Обработка нажатия кнопки "Нет"
-            elif callback.data == 'confirm_delete_no':
-                # Возвращаем описание для фото
-                await callback.message.edit_caption(
-                    caption=f'{LEXICON_RU["photo_found"]} {description_from_db}'
-                )
-                # Очищаем состояние для дальнейшего его использования
-                await state.clear()
-
-        # Обработка команды на редактирование описания к фото
-        elif command == 'update':
-            # Получаем новое описание и категорию для фото
-            new_description = data.get('new_description')
-            new_description_translit = data.get('new_description_translit')
-            # Обработка нажатия кнопки "Да"
-            if callback.data == 'confirm_update_yes':
-                try:
-                    # Обновляем описание для фото в БД
-                    await update_photo_description(
-                        pool=pool,
-                        photo_id=photo_id,
-                        new_description=new_description,
-                        new_description_translit=new_description_translit
-                    )
-                    logger.info(f'Описание для фото {description_from_db} успешно обновлено на {new_description} в БД '
-                                f'администратором {user_name}.')
-                    # Обновляем описание для фотографии в сообщении
-                    await callback.message.edit_caption(
-                        caption=f'{LEXICON_RU["new_photo_description"]}\n'
-                                f'<b>{new_description}</b>'
+                    # Возвращаем старое фото
+                    await callback.message.answer_photo(
+                        photo=photo_id,
+                        caption=LEXICON_RU['update_photo_cancel']
                     )
                     # Очищаем состояние для дальнейшего его использования
                     await state.clear()
-                except Exception as e:
-                    logger.error(f'Ошибка при обработке запроса на подтверждение обновления описания фото в БД: {e}')
-                    await callback.message.answer(text=LEXICON_RU['error'])
-            # Обработка нажатия кнопки "Нет"
-            elif callback.data == 'confirm_update_no':
-                # Возвращаем старое описание для фото
-                await callback.message.edit_caption(
-                    caption=description_from_db
-                )
-                # Очищаем состояние для дальнейшего его использования
-                await state.clear()
 
-        # Обработка команды на замену фото
-        elif command == 'replace':
-            # Получаем новый photo_id, категорию и описание для фото
-            new_photo_id = data.get('new_photo_id')
-            # Обработка нажатия кнопки "Да"
-            if callback.data == 'confirm_replace_yes':
-                try:
-                    # Заменяем фото в БД
-                    await update_photo_in_db(
-                        pool=pool,
-                        photo_id=photo_id,
-                        new_photo_id=new_photo_id
-                    )
-                    logger.info(f'photo_id у фото {description_from_db} успешно заменено на {new_photo_id} в БД '
-                                f'администратором {user_name}.')
-                    # Обновляем описание для фотографии в сообщении
-                    await callback.message.edit_caption(caption=LEXICON_RU['update_photo_successful'])
-                    # Очищаем состояние для дальнейшего его использования
-                    await state.clear()
-                except Exception as e:
-                    logger.error(f'Ошибка при обработке запроса на подтверждение замены фото в БД: {e}')
-                    await callback.message.answer(text=LEXICON_RU['error'])
-            # Обработка нажатия кнопки "Нет"
-            elif callback.data == 'confirm_replace_no':
-                # Удаляем фото из сообщения
-                await callback.message.delete()
-                # Возвращаем старое фото
-                await callback.message.answer_photo(
-                    photo=photo_id,
-                    caption=LEXICON_RU['update_photo_cancel']
-                )
-                # Очищаем состояние для дальнейшего его использования
-                await state.clear()
-
-    else:
-        await callback.answer(text=LEXICON_RU['buttons_not_active'])
-        return
+        else:
+            await callback.answer(text=LEXICON_RU['buttons_not_active'])
+            return
+    except DatabaseGetPhotoDescriptionByFileIdError as e:
+        logger.error(e)
+        await callback.message.edit_text(text=LEXICON_RU['error'])
+    except Exception as e:
+        logger.error(f'Ошибка при обработке одной из команд (add, delete, update, replace): {e}')
+        await callback.message.edit_text(text=LEXICON_RU['error'])

@@ -7,6 +7,7 @@ from aiogram import (
 from aiogram.client.bot import DefaultBotProperties
 from aiogram.enums.parse_mode import ParseMode
 
+from bot_app.exceptions.database import DatabaseConnectionError
 from bot_app.middlewares.add_pool_in_handlers import DatabaseMiddleware
 from bot_app.handlers.bot_commands import bot_commands_router
 from bot_app.handlers.group_handlers import bot_group_joined_router
@@ -66,6 +67,9 @@ async def main():
 
         await dp.start_polling(bot)
 
+    except DatabaseConnectionError as e:
+        logger.error(e)
+
     except asyncio.CancelledError:
         logger.info('Остановка бота...')
     finally:
@@ -78,6 +82,7 @@ async def main():
         # Закрываем пул соединений с БД, если он был создан
         if pool:
             await close_pool(pool)
+            logger.info('Успешная остановка бота.')
 
 
 if __name__ == '__main__':
