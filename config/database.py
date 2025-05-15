@@ -361,7 +361,7 @@ async def get_photo_file_id_by_description_from_db(pool: asyncpg.pool.Pool,
     except asyncpg.PostgresError as e:
         raise DatabaseGetFileIdByDescriptionError.from_exception(e) from e
     except Exception as e:
-        raise DatabaseGetFileIdByDescriptionError(f'{type(e).__name__}: {e} | file_id: {file_id}') from e
+        raise DatabaseGetFileIdByDescriptionError(f'{type(e).__name__}: {e} | description: {description}') from e
 
 
 async def get_categories_from_db(pool: asyncpg.pool.Pool) -> list[dict]:
