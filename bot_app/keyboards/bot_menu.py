@@ -1,5 +1,9 @@
 from aiogram import Bot
-from aiogram.types import BotCommand
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeAllGroupChats
+)
 
 
 from bot_app.lexicon.lexicon_common.lexicon_ru import MENU_COMMANDS
@@ -23,4 +27,13 @@ async def set_main_menu(bot: Bot):
     ]
 
     # Создаём меню в боте
-    await bot.set_my_commands(main_menu_commands)
+    await bot.set_my_commands(
+        main_menu_commands,
+        scope=BotCommandScopeAllPrivateChats()
+    )
+
+    # Удаляем команды для групп и супергрупп
+    await bot.set_my_commands(
+        [],
+        scope=BotCommandScopeAllGroupChats()
+    )
