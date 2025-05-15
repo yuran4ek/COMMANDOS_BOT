@@ -36,6 +36,12 @@ class TransliterationFilter(BaseFilter):
         self.mode = mode
 
     async def __call__(self, message) -> dict[str, str]:
+
+        """
+        Вызов фильтра для осуществления перевода текста.
+        :param message: Сообщение от пользователя.
+        :return: Функция возвращает словарь с оригинальным тестом и переводом этого текста на другой язык.
+        """
         user_input = (message.text or message.caption or "").strip()
 
         # Определяем язык введённого сообщения
