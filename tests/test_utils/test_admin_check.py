@@ -16,7 +16,7 @@ async def test_check_is_admin(mock_admin,
 
     """
     Тестирование функции проверки пользователя на то, что он является админом в группах.
-    :param mock_admin: Функция, возвращающая замокированные объекты Dispatcher, bot и get_chat_member.
+    :param mock_admin: Функция, возвращающая замокированные объекты bot и get_chat_member.
     :param sample_test_data: Словарь с тестовыми данными.
     :return: Функция ничего не возвращает.
     """
@@ -28,14 +28,14 @@ async def test_check_is_admin(mock_admin,
     groups_id = sample_test_data['groups']
 
     # Получаем данные из фикстур
-    mock_dp, _, mock_member = mock_admin
+    mock_bot, mock_member = mock_admin
 
     # Если пользователь админ
-    mock_member.is_chat_admin.return_value = True
+    mock_member.status = 'administrator'
 
     # Запуск функции
     result_is_admin = await check_is_admin(
-        dp=mock_dp,
+        bot=mock_bot,
         user_id=user_id,
         groups_id=groups_id
     )
@@ -44,11 +44,11 @@ async def test_check_is_admin(mock_admin,
     assert result_is_admin is True
 
     # Если пользователь не админ
-    mock_member.is_chat_admin.return_value = False
+    mock_member.status = 'member'
 
     # Запуск функции
     result_not_admin = await check_is_admin(
-        dp=mock_dp,
+        bot=mock_bot,
         user_id=user_id,
         groups_id=groups_id
     )
@@ -64,7 +64,7 @@ async def test_check_is_admin(mock_admin,
 
     # Запуск функции
     result_error = await check_is_admin(
-        dp=mock_dp,
+        bot=mock_bot,
         user_id=user_id,
         groups_id=groups_id
     )

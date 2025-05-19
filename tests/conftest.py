@@ -86,6 +86,7 @@ def mock_handler(mocker):
     message.edit_text = AsyncMock()
     message.edit_caption = AsyncMock()
     message.reply = AsyncMock()
+    message.chat = AsyncMock()
 
     # Мокируем CallbackQuery
     callback = mocker.Mock(spec=CallbackQuery)
@@ -95,6 +96,7 @@ def mock_handler(mocker):
 
     # Мокируем photo
     message.photo = [mocker.Mock()]
+    callback.message.photo = [mocker.Mock()]
 
     # Мокируем user
     message.from_user = mocker.Mock()
@@ -120,6 +122,9 @@ def mock_group_handler(mocker):
 
     # Мокируем Chat
     chat = mocker.Mock(spec=Chat)
+    mock_permissions = mocker.Mock()
+    mock_permissions.can_send_messages = True
+    chat.permissions = mock_permissions
 
     # Мокируем User
     user = mocker.Mock(spec=User)
@@ -130,11 +135,13 @@ def mock_group_handler(mocker):
 
     # Мокируем ChatMemberUpdated
     event = mocker.Mock(spec=ChatMemberUpdated)
+    event.answer = AsyncMock()
     event.chat = chat
     event.new_chat_member = user
     event.new_chat_member.user = user
     event.bot = mocker.Mock()
     event.bot.send_message = AsyncMock()
+    event.bot.get_chat = AsyncMock(return_value=chat)
 
     return bot, event
 
@@ -143,20 +150,18 @@ def mock_group_handler(mocker):
 def mock_admin():
 
     """
-    Фикстура для мокирования Dispatcher, bot и get_chat_member.
-    :return: Возвращает замокированные объекты mock_dp, mock_bot и mock_member.
+    Фикстура для мокирования bot и get_chat_member.
+    :return: Возвращает замокированные объекты mock_bot и mock_member.
     """
 
     # Мокируем объект Dispatcher и bot
-    mock_dp = AsyncMock()
     mock_bot = AsyncMock()
-    mock_dp.__getitem__.return_value = mock_bot
 
     # Мокируем метод get_chat_member
     mock_member = AsyncMock()
     mock_bot.get_chat_member = AsyncMock(return_value=mock_member)
 
-    return mock_dp, mock_bot, mock_member
+    return mock_bot, mock_member
 
 
 @pytest.fixture
@@ -229,6 +234,34 @@ def keyboards_test_data() -> dict[str, InlineKeyboardMarkup]:
                     )
                 ]
             ]
+        ),
+        'categories_keyboard': InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text='1. Cat123',
+                        callback_data='category_Cat123'
+                    ),
+                    InlineKeyboardButton(
+                        text='2. Cat456',
+                        callback_data='category_Cat456'
+                    )
+                ]
+            ]
+        ),
+        'assemble_buttons': InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text='Description123',
+                        callback_data='photo_Description123'
+                    ),
+                    InlineKeyboardButton(
+                        text='Description456',
+                        callback_data='photo_Description456'
+                    )
+                ]
+            ]
         )
     }
 
@@ -255,37 +288,65 @@ def sample_test_data() -> dict[str, dict[str, str | int] | list[int] | list[dict
             789
         ],
         'photo': {
-            'photo_id': 'AgACAgIAAxkBAAEB12345ExampleFileIDExampleID12345',
+            'photo_id': 'photo123',
+            'new_photo_id': 'photo321',
             'description': 'Description123',
-            'category': 'Category123',
-            'new_description': 'NewDescription'
+            'description_translit': 'Дескриптион123',
+            'category': 'Cat123',
+            'category_id': 123,
+            'new_description': 'NewDescription',
+            'new_description_translit': 'НьюДескриптион'
         },
         'photos': [
             {
-                'photo_id': 'AgACAgIAAxkBAAEB12345ExampleFileIDExampleID12345',
+                'id': 123,
+                'photo_id': 'photo123',
                 'description': 'Description123',
-                'category': 'Category123'
+                'category': 'Category123',
+                'category_id': 123
             },
             {
+                'id': 456,
                 'photo_id': 'photo456',
-                'description': 'Description456',
-                'category': 'Category123'
+                'description': 'Des456',
+                'category': 'Category123',
+                'category_id': 123
             },
             {
+                'id': 789,
                 'photo_id': 'photo789',
-                'description': 'Description789',
-                'category': 'Category'
+                'description': '789',
+                'category': 'Category',
+                'category_id': 789
             }
         ],
         'category': [
-            'Category123',
-            'Category456',
-            'Category789'
+            {
+                'category_name': 'Cat123',
+                'name': 'Cat123',
+                'description': 'Cat123'
+            },
+            {
+                'category_name': 'Cat456',
+                'name': 'Cat456',
+                'description': 'Cat456'
+            },
+            {
+                'category_name': 'Cat789',
+                'name': 'Cat789',
+                'description': 'Cat789'
+            },
         ],
+        'category_id': {
+            'id': 123,
+            'category': 'Category123'
+        },
         'state': {
             'photo_id': 'AgACAgIAAxkBAAEB12345ExampleFileIDExampleID12345',
+            'new_photo_id': 'newphoto123',
             'category': 'Category123',
             'new_description': 'NewDescription',
+            'new_description_translit': 'НьюДескриптионТранслит',
             'current_page': 2
         },
         'text': {
@@ -295,12 +356,17 @@ def sample_test_data() -> dict[str, dict[str, str | int] | list[int] | list[dict
         'command': [
             'add',
             'delete',
-            'update'
+            'update',
+            'replace'
         ],
         'chat': {
             'chat_id': 123456789,
             'chat_title': 'Test Group',
             'bot_id': 987654321
         },
+        'transliterate_filter': {
+            'description': 'Description123',
+            'description_translit': 'Дескриптион123'
+    },
         'bot': 'TestBot'
     }
