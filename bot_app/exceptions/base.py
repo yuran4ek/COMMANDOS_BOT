@@ -7,7 +7,7 @@ class BotAppError(Exception):
         super().__init__(*args)
 
     def __str__(self):
-        base = self.__doc__ or 'Неизвестная ошибка!'
+        base = (self.__doc__ or 'Неизвестная ошибка!').strip()
         return f'{base} {self.extra_info}' if self.extra_info else base
 
     @classmethod
