@@ -105,7 +105,7 @@ async def get_groups_from_db(pool: asyncpg.pool.Pool) -> list[int]:
     except asyncpg.PostgresError as e:
         raise DatabaseGetGroupError.from_exception(e) from e
     except Exception as e:
-        raise DatabaseGetGroupError(f'Непредвиденная ошибка: {type(e).__name__}: {e}') from e
+        raise DatabaseGetGroupError(f'{type(e).__name__}: {e}') from e
 
 
 async def delete_group_from_db(pool: asyncpg.pool.Pool,
@@ -385,7 +385,7 @@ async def get_categories_from_db(pool: asyncpg.pool.Pool) -> list[dict]:
     except asyncpg.PostgresError as e:
         raise DatabaseGetCategoriesError.from_exception(e) from e
     except Exception as e:
-        raise DatabaseGetCategoriesError(f'Неизвестная ошибка: {e}') from e
+        raise DatabaseGetCategoriesError.from_exception(e) from e
 
 
 async def delete_photo_from_db(pool: asyncpg.pool.Pool,
@@ -510,7 +510,10 @@ async def search_photo_by_description_in_db(pool: asyncpg.pool.Pool,
             )
         return [dict(row) for row in rows]
     except asyncpg.PostgresError as e:
-        raise DatabaseSearchPhotoByDescriptionError.from_exception(e) from e
+        raise DatabaseSearchPhotoByDescriptionError(
+            f'{type(e).__name__}: {e} | category: {category} | query: {query}'
+        ) from e
     except Exception as e:
-        logger.error(f'Ошибка при поиске фото: {e}')
-        return []
+        raise DatabaseSearchPhotoByDescriptionError(
+            f'{type(e).__name__}: {e} | category: {category} | query: {query}'
+        ) from e
