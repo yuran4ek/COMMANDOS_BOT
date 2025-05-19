@@ -65,7 +65,7 @@ async def update_photo_handler(message: Message,
         if not data.get('cancel_handler'):
             # Получаем группы из БД
             groups_id = await get_groups_from_db(pool=pool)
-            logger.info('Успешное получение всех групп из БД.')
+
             # Получаем ID пользователя
             user_id = message.from_user.id
             # Проверяем, является ли пользователь администратором в одной из групп
@@ -88,8 +88,6 @@ async def update_photo_handler(message: Message,
                 pool=pool,
                 file_id=photo_id
             )
-            logger.info(f'Успешное получение описания фото {description} по file_id {photo_id}.')
-
             # Сохраняем новый file_id в FSM
             await state.update_data(new_photo_id=new_photo_id)
             # Отправляем сообщение пользователю с информацией об описании и категории для фото и ждём
@@ -136,9 +134,7 @@ async def check_message_for_photo(message: Message,
         translit_filter = TransliterationFilter(mode='add')
         # Получаем категории, группы из БД
         categories = await get_categories_from_db(pool=pool)
-        logger.info('Успешное получение всех категорий из БД.')
         groups_id = await get_groups_from_db(pool=pool)
-        logger.info('Успешное получение всех групп из БД.')
 
         # Получаем ID пользователя
         user_id = message.from_user.id
@@ -306,7 +302,6 @@ async def process_update_photo_description(callback: CallbackQuery,
                 pool=pool,
                 file_id=photo_id
             )
-            logger.info(f'Успешное получение описания фото {description} по file_id {photo_id}.')
 
             # редактируем описание для фотографии
             await callback.message.edit_caption(
@@ -402,7 +397,6 @@ async def process_confirm_callback(callback: CallbackQuery,
                     pool=pool,
                     file_id=photo_id
                 )
-            logger.info(f'Успешное получение описания фото {description_from_db} по file_id {photo_id}.')
 
             # Обработка команды на добавление фото с описанием в БД
             if command == 'add':
@@ -421,12 +415,13 @@ async def process_confirm_callback(callback: CallbackQuery,
                             description_translit=description_translit,
                             category_name=category
                         )
-                        logger.info(f'Фото "{description}" успешно добавлено в категорию "{category}"')
+                        logger.info(f'Фото {description} успешно добавлено в категорию {category}.')
                         # Уведомляем пользователя об успешном выполнении операции
                         await callback.message.edit_text(text=LEXICON_RU['add_photo_confirm'])
                         # Очищаем состояние для дальнейшего его использования
                         await state.clear()
                     except PhotoAlreadyExistsError as e:
+                        logger.warning(e)
                         await callback.message.answer(
                             f'⚠️ {str(e)}\n\n'
                             f'{LEXICON_RU["photo_already_exists_error"]}'
@@ -547,7 +542,7 @@ async def process_confirm_callback(callback: CallbackQuery,
             return
     except DatabaseGetPhotoDescriptionByFileIdError as e:
         logger.error(e)
-        await callback.message.edit_text(text=LEXICON_RU['error'])
+        await callback.message.answer(text=LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Ошибка при обработке одной из команд (add, delete, update, replace): {e}')
-        await callback.message.edit_text(text=LEXICON_RU['error'])
+        await callback.message.answer(text=LEXICON_RU['error'])

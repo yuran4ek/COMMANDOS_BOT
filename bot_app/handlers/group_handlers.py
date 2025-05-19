@@ -54,12 +54,13 @@ async def on_chat_joined(event: ChatMemberUpdated):
         chat_info = await event.bot.get_chat(chat_id=group_id)
 
         if chat_info.permissions.can_send_messages:
+            logger.info(f'Бот при добавлении в группу {group_name} может сразу отправлять сообщения.')
             await event.bot.send_message(
                 chat_id=group_id,
                 text=LEXICON_RU['add_bot_in_group']
             )
         else:
-            logger.warning(f'Бот пока не имеет прав на отправку сообщений в группе {group_name}.'
+            logger.warning(f'Бот пока не имеет прав на отправку сообщений в группе {group_name}. '
                            f'Для отправки сообщений необходимо выдать права администратора боту.')
 
     except Exception as e:
@@ -97,10 +98,13 @@ async def on_chat_admin(event: ChatMemberUpdated,
             )
         except DatabaseAddGroupError as e:
             logger.error(e)
+            await event.answer(text=LEXICON_RU['error'])
         except Exception as e:
             logger.error(f'Ошибка при отправке приветственного сообщения в группу: {e}')
+            await event.answer(text=LEXICON_RU['error'])
     except Exception as e:
         logger.error(f'Неожиданная ошибка в обработчике ChatMemberUpdatedFilter: {e}')
+        await event.answer(text=LEXICON_RU['error'])
 
 
 @bot_group_joined_router.message(F.text)
@@ -121,7 +125,7 @@ async def on_bot_mention(message: Message,
         if message.entities:
             for entity in message.entities:
                 if entity.type == 'mention':
-                    mention_text = message.text[entity.offset : entity.offset + entity.length]
+                    mention_text = message.text[entity.offset: entity.offset + entity.length]
                     # Проверяем, есть ли упоминание бота в сообщении
                     if mention_text == f'@{bot_info.username}':
                         # Отправляем сообщение с инлайн-кнопкой для перехода в ЛС
